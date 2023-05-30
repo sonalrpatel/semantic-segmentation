@@ -16,7 +16,7 @@ backend = tf.keras.backend
 
 
 class DeepLabV3(Network):
-    def __init__(self, num_classes, version='DeepLabV3', base_model='ResNet50', **kwargs):
+    def __init__(self, num_classes, input_size=None, version='DeepLabV3', base_model='ResNet50', **kwargs):
         """
         The initialization of DeepLabV3.
         :param num_classes: the number of predicted classes.
@@ -26,7 +26,7 @@ class DeepLabV3(Network):
         """
         dilation = [1, 2]
         base_model = 'ResNet50' if base_model is None else base_model
-
+        
         assert version == 'DeepLabV3'
         assert base_model in ['VGG16',
                               'VGG19',
@@ -40,15 +40,13 @@ class DeepLabV3(Network):
                               'MobileNetV1',
                               'MobileNetV2',
                               'Xception-DeepLab']
+        
         super(DeepLabV3, self).__init__(num_classes, version, base_model, dilation, **kwargs)
         self.dilation = dilation
+        self.input_size = input_size
 
-    def __call__(self, inputs=None, input_size=None, **kwargs):
-        assert inputs is not None or input_size is not None
-
-        if inputs is None:
-            assert isinstance(input_size, tuple)
-            inputs = layers.Input(shape=input_size + (3,))
+    def __call__(self, **kwargs):
+        inputs = layers.Input(shape=self.input_size + (3,))
         return self._deeplabv3(inputs)
 
     def _deeplabv3(self, inputs):

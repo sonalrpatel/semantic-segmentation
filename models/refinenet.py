@@ -15,7 +15,7 @@ backend = tf.keras.backend
 
 
 class RefineNet(Network):
-    def __init__(self, num_classes, version='RefineNet', base_model='ResNet50', **kwargs):
+    def __init__(self, num_classes, input_size=None, version='RefineNet', base_model='ResNet50', **kwargs):
         """
         The initialization of RefineNet.
         :param num_classes: the number of predicted classes.
@@ -33,38 +33,13 @@ class RefineNet(Network):
                               'ResNet152',
                               'MobileNetV1',
                               'MobileNetV2']
+        
         super(RefineNet, self).__init__(num_classes, version, base_model, **kwargs)
+        self.input_size = input_size
 
-    def __call__(self, inputs=None, input_size=None, **kwargs):
-        assert inputs is not None or input_size is not None
-
-        if inputs is None:
-            assert isinstance(input_size, tuple)
-            inputs = layers.Input(shape=input_size + (3,))
+    def __call__(self, **kwargs):
+        inputs = layers.Input(shape=self.input_size + (3,))
         return self._refinenet(inputs)
-
-    def _refinenet(self, inputs):
-        num_classes = self.num_classes
-
-        xs = self.encoder(inputs, output_stages=['c2', 'c3', 'c4', 'c5'])[::-1]
-
-        g = [None, None, None, None]
-        h = [None, None, None, None]
-
-        for i in range(4):
-            h[i] = layers.Conv2D(256, 1, strides=1, kernel_initializer='he_normal')(xs[i])
-
-        g[0] = self._refine_block(high_inputs=None, low_inputs=h[0])
-        g[1] = self._refine_block(g[0], h[1])
-        g[2] = self._refine_block(g[1], h[2])
-        g[3] = self._refine_block(g[2], h[3])
-
-        x = layers.Conv2D(num_classes, 1, strides=1, kernel_initializer='he_normal')(g[3])
-        x = layers.UpSampling2D(size=(4, 4), interpolation='bilinear')(x)
-
-        outputs = x
-
-        return models.Model(inputs, outputs, name=self.version)
 
     def _residual_conv_unit(self, inputs, features=256, kernel_size=3):
         x = layers.ReLU()(inputs)
@@ -83,11 +58,9 @@ class RefineNet(Network):
         x = layers.MaxPool2D((5, 5), strides=1, padding='same')(x_relu)
         x = layers.Conv2D(features, 3, padding='same', kernel_initializer='he_normal')(x)
         x_sum_2 = layers.Add()([x, x_sum_1])
-
         return x_sum_2
 
     def _multi_resolution_fusion(self, high_inputs=None, low_inputs=None, features=256):
-
         if high_inputs is None:  # refineNet block 4
             rcu_low_1 = low_inputs[0]
             rcu_low_2 = low_inputs[1]
@@ -119,7 +92,6 @@ class RefineNet(Network):
             return layers.Add()([rcu_low, rcu_high])
 
     def _refine_block(self, high_inputs=None, low_inputs=None):
-
         if high_inputs is None:  # block 4
             rcu_low_1 = self._residual_conv_unit(low_inputs, features=256)
             rcu_low_2 = self._residual_conv_unit(low_inputs, features=256)
@@ -128,7 +100,6 @@ class RefineNet(Network):
             fuse = self._multi_resolution_fusion(high_inputs=None, low_inputs=rcu_low, features=256)
             fuse_pooling = self._chained_residual_pooling(fuse, features=256)
             output = self._residual_conv_unit(fuse_pooling, features=256)
-            return output
         else:
             rcu_low_1 = self._residual_conv_unit(low_inputs, features=256)
             rcu_low_2 = self._residual_conv_unit(low_inputs, features=256)
@@ -141,4 +112,26 @@ class RefineNet(Network):
             fuse = self._multi_resolution_fusion(rcu_high, rcu_low, features=256)
             fuse_pooling = self._chained_residual_pooling(fuse, features=256)
             output = self._residual_conv_unit(fuse_pooling, features=256)
-            return output
+        return output
+
+    def _refinenet(self, inputs):
+        num_classes = self.num_classes
+
+        xs = self.encoder(inputs, output_stages=['c2', 'c3', 'c4', 'c5'])[::-1]
+
+        g = [None, None, None, None]
+        h = [None, None, None, None]
+
+        for i in range(4):
+            h[i] = layers.Conv2D(256, 1, strides=1, kernel_initializer='he_normal')(xs[i])
+
+        g[0] = self._refine_block(high_inputs=None, low_inputs=h[0])
+        g[1] = self._refine_block(g[0], h[1])
+        g[2] = self._refine_block(g[1], h[2])
+        g[3] = self._refine_block(g[2], h[3])
+
+        x = layers.Conv2D(num_classes, 1, strides=1, kernel_initializer='he_normal')(g[3])
+        x = layers.UpSampling2D(size=(4, 4), interpolation='bilinear')(x)
+
+        outputs = x
+        return models.Model(inputs, outputs, name=self.version)        

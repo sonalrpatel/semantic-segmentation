@@ -16,17 +16,18 @@ backend = tf.keras.backend
 
 
 class DeepLabV3Plus(Network):
-    def __init__(self, num_classes, version='DeepLabV3Plus', base_model='Xception-DeepLab', **kwargs):
+    def __init__(self, num_classes, input_size=None, version='DeepLabV3Plus', base_model='Xception-DeepLab', **kwargs):
         """
         The initialization of DeepLabV3Plus.
-        :param num_classes: the number of predicted classes.
+        :param num_classes: the number of predicted classes
+        :param input_size: the size of input image
         :param version: 'DeepLabV3Plus'
         :param base_model: the backbone model
         :param kwargs: other parameters
         """
         dilation = [1, 2]
         base_model = 'Xception-DeepLab' if base_model is None else base_model
-
+        
         assert version == 'DeepLabV3Plus'
         assert base_model in ['VGG16',
                               'VGG19',
@@ -40,16 +41,38 @@ class DeepLabV3Plus(Network):
                               'MobileNetV1',
                               'MobileNetV2',
                               'Xception-DeepLab']
+        
         super(DeepLabV3Plus, self).__init__(num_classes, version, base_model, dilation, **kwargs)
         self.dilation = dilation
+        self.input_size = input_size
 
-    def __call__(self, inputs=None, input_size=None, **kwargs):
-        assert inputs is not None or input_size is not None
-
-        if inputs is None:
-            assert isinstance(input_size, tuple)
-            inputs = layers.Input(shape=input_size + (3,))
+    def __call__(self, **kwargs):
+        inputs = layers.Input(shape=self.input_size + (3,))
         return self._deeplab_v3_plus(inputs)
+
+    def _conv_bn_relu(self, x, filters, kernel_size, strides=1):
+        x = layers.Conv2D(filters, kernel_size, strides=strides, padding='same')(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.ReLU()(x)
+        return x
+
+    def _aspp(self, x, out_filters):
+        xs = list()
+        x1 = layers.Conv2D(out_filters, 1, strides=1)(x)
+        xs.append(x1)
+
+        for i in range(3):
+            xi = layers.Conv2D(out_filters, 3, strides=1, padding='same', dilation_rate=6 * (i + 1))(x)
+            xs.append(xi)
+        img_pool = custom_layers.GlobalAveragePooling2D(keep_dims=True)(x)
+        img_pool = layers.Conv2D(out_filters, 1, 1, kernel_initializer='he_normal')(img_pool)
+        img_pool = layers.UpSampling2D(size=self.aspp_size, interpolation='bilinear')(img_pool)
+        xs.append(img_pool)
+
+        x = custom_layers.Concatenate(out_size=self.aspp_size)(xs)
+        x = layers.Conv2D(out_filters, 1, strides=1, kernel_initializer='he_normal')(x)
+        x = layers.BatchNormalization()(x)
+        return x
 
     def _deeplab_v3_plus(self, inputs):
         num_classes = self.num_classes
@@ -85,28 +108,4 @@ class DeepLabV3Plus(Network):
 
         outputs = x
         return models.Model(inputs, outputs, name=self.version)
-
-    def _conv_bn_relu(self, x, filters, kernel_size, strides=1):
-        x = layers.Conv2D(filters, kernel_size, strides=strides, padding='same')(x)
-        x = layers.BatchNormalization()(x)
-        x = layers.ReLU()(x)
-        return x
-
-    def _aspp(self, x, out_filters):
-        xs = list()
-        x1 = layers.Conv2D(out_filters, 1, strides=1)(x)
-        xs.append(x1)
-
-        for i in range(3):
-            xi = layers.Conv2D(out_filters, 3, strides=1, padding='same', dilation_rate=6 * (i + 1))(x)
-            xs.append(xi)
-        img_pool = custom_layers.GlobalAveragePooling2D(keep_dims=True)(x)
-        img_pool = layers.Conv2D(out_filters, 1, 1, kernel_initializer='he_normal')(img_pool)
-        img_pool = layers.UpSampling2D(size=self.aspp_size, interpolation='bilinear')(img_pool)
-        xs.append(img_pool)
-
-        x = custom_layers.Concatenate(out_size=self.aspp_size)(xs)
-        x = layers.Conv2D(out_filters, 1, strides=1, kernel_initializer='he_normal')(x)
-        x = layers.BatchNormalization()(x)
-
-        return x
+    

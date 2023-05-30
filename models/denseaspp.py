@@ -16,7 +16,7 @@ backend = tf.keras.backend
 
 
 class DenseASPP(Network):
-    def __init__(self, num_classes, version='DenseASPP', base_model='DenseNet121', **kwargs):
+    def __init__(self, num_classes, input_size=None, version='DenseASPP', base_model='DenseNet121', **kwargs):
         """
         The initialization of DenseASPP based.
         :param num_classes: the number of predicted classes.
@@ -40,14 +40,12 @@ class DenseASPP(Network):
                               'MobileNetV1',
                               'MobileNetV2',
                               'Xception-DeepLab']
+
         super(DenseASPP, self).__init__(num_classes, version, base_model, dilation, **kwargs)
+        self.input_size = input_size
 
-    def __call__(self, inputs=None, input_size=None, **kwargs):
-        assert inputs is not None or input_size is not None
-
-        if inputs is None:
-            assert isinstance(input_size, tuple)
-            inputs = layers.Input(shape=input_size + (3,))
+    def __call__(self, **kwargs):
+        inputs = layers.Input(shape=self.input_size + (3,))
         return self._denseaspp(inputs)
 
     def _dilated_conv_block(self, inputs, filters, kernel_size=3, rate=1):

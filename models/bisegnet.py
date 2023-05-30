@@ -16,25 +16,24 @@ backend = tf.keras.backend
 
 
 class BiSegNet(Network):
-    def __init__(self, num_classes, version='BiSegNet', base_model='Xception', **kwargs):
+    def __init__(self, num_classes, input_size=None, version='BiSegNet', base_model='Xception', **kwargs):
         """
         The initialization of BiSegNet.
-        :param num_classes: the number of predicted classes.
+        :param num_classes: the number of predicted classes
+        :param input_size: the size of input image
         :param version: 'BiSegNet'
         :param base_model: the backbone model
         :param kwargs: other parameters
         """
         base_model = 'Xception' if base_model is None else base_model
-
+        
         assert version == 'BiSegNet'
+        
         super(BiSegNet, self).__init__(num_classes, version, base_model, **kwargs)
+        self.input_size = input_size        
 
-    def __call__(self, inputs=None, input_size=None, **kwargs):
-        assert inputs is not None or input_size is not None
-
-        if inputs is None:
-            assert isinstance(input_size, tuple)
-            inputs = layers.Input(shape=input_size+(3,))
+    def __call__(self, **kwargs):
+        inputs = layers.Input(shape=self.input_size + (3,))
         return self._bisegnet(inputs)
 
     def _conv_block(self, x, filters, kernel_size=3, strides=1):
@@ -53,7 +52,6 @@ class BiSegNet(Network):
         glb = layers.Activation(activation='sigmoid')(glb)
 
         x = layers.Multiply()([x, glb])
-
         return x
 
     def _feature_fusion_module(self, input_1, input_2, filters):
@@ -68,7 +66,6 @@ class BiSegNet(Network):
         glb = layers.Conv2D(filters, 1, strides=1, activation='sigmoid', kernel_initializer='he_normal')(glb)
 
         x = layers.Multiply()([inputs, glb])
-
         return x
 
     def _bisegnet(self, inputs):
@@ -111,5 +108,4 @@ class BiSegNet(Network):
         x = layers.Conv2D(num_classes, 1, 1, kernel_initializer='he_normal')(x)
 
         outputs = x
-
         return models.Model(inputs, outputs, name=self.version)

@@ -7,12 +7,9 @@ The model builder to build different semantic segmentation models.
 
 """
 from models import *
-import tensorflow as tf
-
-layers = tf.keras.layers
 
 
-def builder(num_classes, input_size=(256, 256), model='SegNet', base_model=None):
+def model_builder(num_classes, input_size=(256, 256), model='SegNet', base_model=None):
     models = {'FCN-8s': FCN,
               'FCN-16s': FCN,
               'FCN-32s': FCN,
@@ -28,9 +25,15 @@ def builder(num_classes, input_size=(256, 256), model='SegNet', base_model=None)
               'BiSegNet': BiSegNet}
 
     assert model in models
+    assert isinstance(input_size, tuple)
 
-    net = models[model](num_classes, model, base_model)
+    # initialise the selected model class
+    model = models[model](num_classes, input_size, model, base_model)
+    
+    # get the base_model name
+    base_model = model.get_base_model()
 
-    inputs = layers.Input(shape=input_size+(3,))
+    # build the model by calling __call__
+    model = model()
 
-    return net(inputs), net.get_base_model()
+    return model, base_model
