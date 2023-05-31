@@ -5,6 +5,9 @@ input_validation: D:\Datasets\cityscapes\leftImg8bit_trainvaltest\leftImg8bit\va
 label_validation: D:\Datasets\cityscapes\gtFine_trainvaltest\gtFine\val
 max_samples_validation: 2000
 
+# not used (only there as reference)
+one-hot-palette-label: config\class.camvid.xml
+
 image_shape: [256, 256]
 num_classes: 21
 
