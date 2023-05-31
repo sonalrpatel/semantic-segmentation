@@ -7,6 +7,7 @@ from utils.learning_rate import *
 from utils.metrics import MeanIoU
 from utils import utils
 from builders import model_builder
+from config.labels import labels
 import tensorflow as tf
 import configargparse
 import cv2
@@ -24,7 +25,7 @@ def str2bool(v):
 
 # parse parameters from config file or CLI
 parser = configargparse.ArgParser()
-parser.add("-c",    "--config",     is_config_file=True,    default="config/config.semseg.yml", help="config file")
+parser.add("-c",    "--config",     is_config_file=True,    default="config/config.semseg.cityscapes.yml", help="config file")
 # parser.add("-c",    "--config",                     is_config_file=True,                        help="config file")
 parser.add("-d",    "--dataset",                    type=str,       default="CamVid",           help="the path of the dataset")
 parser.add("-it",   "--input_training",             type=str,       required=True,              help="directory/directories of input samples for training")
@@ -89,9 +90,8 @@ paths = check_related_path(conf.output_dir)
 # get image and label file names for training and validation
 # get max_samples_training random training samples
 # TODO: consider images and labels when there names matches
-n_inputs = len(conf.input_training)
-files_train_input = utils.get_files_in_folder(conf.input_training)
-files_train_label = utils.get_files_in_folder(conf.label_training)
+files_train_input = utils.get_files_recursive(conf.input_training)
+files_train_label = utils.get_files_recursive(conf.label_training, "color")
 _, idcs = utils.sample_list(files_train_label, n_samples=conf.max_samples_training)
 files_train_input = np.take(files_train_input, idcs)
 files_train_label = np.take(files_train_label, idcs)
@@ -100,8 +100,8 @@ image_shape_original_label = utils.load_image(files_train_label[0]).shape[0:2]
 print(f"Found {len(files_train_label)} training samples")
 
 # get max_samples_validation random validation samples
-files_valid_input = utils.get_files_in_folder(conf.input_validation)
-files_valid_label = utils.get_files_in_folder(conf.label_validation)
+files_valid_input = utils.get_files_recursive(conf.input_validation)
+files_valid_label = utils.get_files_recursive(conf.label_validation, "color")
 _, idcs = utils.sample_list(files_valid_label, n_samples=conf.max_samples_validation)
 files_valid_input = np.take(files_valid_input, idcs)
 files_valid_label = np.take(files_valid_label, idcs)
@@ -109,37 +109,29 @@ print(f"Found {len(files_valid_label)} validation samples")
 
 # parse one-hot-conversion.xml
 conf.one_hot_palette_label = utils.parse_convert_xml(conf.one_hot_palette_label)
-n_classes_label = len(conf.one_hot_palette_label)
+# n_classes_label = len(conf.one_hot_palette_label)
+palette_label = [[np.array(labels[k].color)] for k in range(len(labels)) if labels[k].trainId > 0 and labels[k].trainId < 255]
+n_classes_label = len(palette_label)
 
-def one_hot_encode_image(image, palette):
+
+def one_hot_encode_label_op(image, palette):
     one_hot_map = []
 
-    # find instances of class colors and append layer to one-hot-map
     for class_colors in palette:
-        class_map = np.zeros(image.shape[0:2], dtype=bool)
+        class_map = tf.zeros(image.shape[0:2], dtype=tf.int32)
         for color in class_colors:
-            class_map = class_map | (image == color).all(axis=-1)
+            # find instances of color and append layer to one-hot-map
+            class_map = tf.bitwise.bitwise_or(class_map, tf.cast(tf.reduce_all(tf.equal(image, color), axis=-1), tf.int32))
         one_hot_map.append(class_map)
 
     # finalize one-hot-map
-    one_hot_map = np.stack(one_hot_map, axis=-1)
-    one_hot_map = one_hot_map.astype(np.float32)
+    one_hot_map = tf.stack(one_hot_map, axis=-1)
+    one_hot_map = tf.cast(one_hot_map, tf.float32)
 
     return one_hot_map
 
-def one_hot(label, num_classes):
-    if np.ndim(label) == 3 and label.shape[2] == 1:
-        label = np.squeeze(label, axis=-1)
-    if np.ndim(label) == 3 and label.shape[2] == 3:
-        label = cv2.cvtColor(label, cv2.COLOR_BGR2GRAY)
-    assert np.ndim(label) == 2
-
-    heat_map = np.ones(shape=label.shape[0:2] + (num_classes,))
-    for i in range(num_classes):
-        heat_map[:, :, i] = np.equal(label, i).astype('float32')
-    return heat_map
-
-
+# data generator
+# build dataset pipeline parsing functions
 def parse_sample(input_files, label_file):
     # parse and process input images
     input = utils.load_image_op(input_files)
@@ -151,12 +143,12 @@ def parse_sample(input_files, label_file):
     label = utils.load_image_op(label_file)
     label = utils.resize_image_op(label, image_shape_original_label, conf.image_shape, interpolation=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
     # one hot encode the seg_mask
-    label = utils.one_hot_op(label, conf.num_classes)
-    # label = one_hot_encode_image(label.numpy(), conf.one_hot_palette_label)
+    # label = utils.one_hot_gray_op(label, conf.num_classes)
+    label = utils.one_hot_encode_label_op(label, conf.one_hot_palette_label)
     return input, label
 
-inf = "data\\camvid\\train\\images\\0001TP_006690.png"
-lf = "data\\camvid\\train\\labels\\0001TP_007050_L.png"
+inf = "C:/Users/pso9kor/Datasets/cityscapes/leftImg8bit_trainvaltest/leftImg8bit/train/aachen/aachen_000000_000019_leftImg8bit.png"
+lf = "C:/Users/pso9kor/Datasets/cityscapes/gtFine_trainvaltest/gtFine/train/aachen/aachen_000000_000019_gtFine_color.png"
 
 inff, lff = parse_sample(inf, lf)
 

@@ -12,6 +12,7 @@ import numpy as np
 import tensorflow as tf
 import xml.etree.ElementTree as xmlET
 import cv2
+import glob
 import os
 
 
@@ -22,8 +23,23 @@ def abspath(path):
     return abspath
 
 
-def get_files_in_folder(folder):
-    return sorted([os.path.join(folder, f) for f in os.listdir(folder)])
+def flatten(list):
+    return [item for sublist in list for item in sublist]
+
+def get_folders_in_folder(folder):
+    return [f[0] for f in os.walk(folder)][1:]
+
+def get_files_in_folder(folder, pattern=None):
+    if pattern is None:
+        return sorted([os.path.join(folder, f) for f in os.listdir(folder)])
+    else:
+        return sorted([os.path.join(folder, f) for f in os.listdir(folder) if pattern in f])
+
+def get_files_recursive(folder, pattern=None):
+    if not bool(get_folders_in_folder(folder)):
+        return get_files_in_folder(folder, pattern)
+    else:
+        return flatten([get_files_in_folder(f, pattern) for f in get_folders_in_folder(folder)])
 
 
 def sample_list(*ls, n_samples, replace=False):
@@ -192,7 +208,7 @@ def random_channel_shift(image, label, channel_shift_range):
     return image, label
 
 
-def one_hot(label, num_classes):
+def one_hot_gray(label, num_classes):
     if np.ndim(label) == 3 and label.shape[2] == 1:
         label = np.squeeze(label, axis=-1)
     if np.ndim(label) == 3 and label.shape[2] > 1:
@@ -205,22 +221,7 @@ def one_hot(label, num_classes):
     return heat_map
 
 
-def one_hot_op0(label, num_classes):
-    if label.ndim == 3 and label.shape[2] == 1:
-        label = tf.squeeze(label, axis=-1)
-    if label.ndim == 3 and label.shape[2] > 1:
-        label = tf.squeeze(tf.image.rgb_to_grayscale(label), axis=-1)
-    assert label.ndim == 2
-
-    heat_map = []
-    for i in range(num_classes):
-        heat_map.append(tf.equal(label, i))
-    heat_map = tf.stack(heat_map, axis=-1)
-    heat_map = tf.cast(heat_map, dtype=tf.float32)
-    return heat_map
-
-
-def one_hot_op(label, num_classes):
+def one_hot_gray_op(label, num_classes):
     if len(list(label.shape)) == 3 and label.shape[2] == 1:
         label = tf.squeeze(label, axis=-1)
     if len(list(label.shape)) == 3 and label.shape[2] > 1:
@@ -233,6 +234,23 @@ def one_hot_op(label, num_classes):
     heat_map = tf.stack(heat_map, axis=-1)
     heat_map = tf.cast(heat_map, dtype=tf.float32)
     return heat_map
+
+
+def one_hot_encode_label_op(image, palette):
+    one_hot_map = []
+
+    for class_colors in palette:
+        class_map = tf.zeros(image.shape[0:2], dtype=tf.int32)
+        for color in class_colors:
+            # find instances of color and append layer to one-hot-map
+            class_map = tf.bitwise.bitwise_or(class_map, tf.cast(tf.reduce_all(tf.equal(image, color), axis=-1), tf.int32))
+        one_hot_map.append(class_map)
+
+    # finalize one-hot-map
+    one_hot_map = tf.stack(one_hot_map, axis=-1)
+    one_hot_map = tf.cast(one_hot_map, tf.float32)
+
+    return one_hot_map
 
 
 def decode_one_hot(one_hot_map):

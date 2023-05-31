@@ -15,6 +15,7 @@ from utils.learning_rate import *
 from utils.metrics import MeanIoU
 from utils import utils
 from builders import model_builder
+from config.labels import labels
 import tensorflow as tf
 import configargparse
 import os
@@ -31,7 +32,7 @@ def str2bool(v):
 
 # parse parameters from config file or CLI
 parser = configargparse.ArgParser()
-parser.add("-c",    "--config",     is_config_file=True,    default="config/config.semseg.yml", help="config file")
+parser.add("-c",    "--config",     is_config_file=True,    default="config/config.semseg.cityscapes.yml", help="config file")
 # parser.add("-c",    "--config",                     is_config_file=True,                        help="config file")
 parser.add("-d",    "--dataset",                    type=str,       default="CamVid",           help="the path of the dataset")
 parser.add("-it",   "--input_training",             type=str,       required=True,              help="directory/directories of input samples for training")
@@ -42,6 +43,7 @@ parser.add("-lv",   "--label_validation",           type=str,       required=Tru
 parser.add("-nv",   "--max_samples_validation",     type=int,       default=None,               help="maximum number of validation samples")
 parser.add("-is",   "--image_shape",                type=int,       required=True, nargs=2,     help="image dimensions (HxW) of inputs and labels for network")
 parser.add("-nc",   "--num_classes",                type=int,       default=32,                 help="The number of classes to be segmented")
+parser.add("-ohl",  "--one-hot-palette-label",      type=str,       required=True,              help="xml-file for one-hot-conversion of labels")
 parser.add("-m",    "--model",                      type=str,       required=True,              help="choose the semantic segmentation methods")
 parser.add("-bm",   "--base_model",                 type=str,       default=None,               help="choose the backbone model")
 parser.add("-bt",   "--batch_size",                 type=int,       default=4,                  help="training batch size")
@@ -95,9 +97,8 @@ paths = check_related_path(conf.output_dir)
 # get image and label file names for training and validation
 # get max_samples_training random training samples
 # TODO: consider images and labels when there names matches
-n_inputs = len(conf.input_training)
-files_train_input = utils.get_files_in_folder(conf.input_training)
-files_train_label = utils.get_files_in_folder(conf.label_training)
+files_train_input = utils.get_files_recursive(conf.input_training)
+files_train_label = utils.get_files_recursive(conf.label_training, "color")
 _, idcs = utils.sample_list(files_train_label, n_samples=conf.max_samples_training)
 files_train_input = np.take(files_train_input, idcs)
 files_train_label = np.take(files_train_label, idcs)
@@ -106,13 +107,18 @@ image_shape_original_label = utils.load_image(files_train_label[0]).shape[0:2]
 print(f"Found {len(files_train_label)} training samples")
 
 # get max_samples_validation random validation samples
-files_valid_input = utils.get_files_in_folder(conf.input_validation)
-files_valid_label = utils.get_files_in_folder(conf.label_validation)
+files_valid_input = utils.get_files_recursive(conf.input_validation)
+files_valid_label = utils.get_files_recursive(conf.label_validation, "color")
 _, idcs = utils.sample_list(files_valid_label, n_samples=conf.max_samples_validation)
 files_valid_input = np.take(files_valid_input, idcs)
 files_valid_label = np.take(files_valid_label, idcs)
 print(f"Found {len(files_valid_label)} validation samples")
 
+# parse one-hot-conversion.xml
+conf.one_hot_palette_label = utils.parse_convert_xml(conf.one_hot_palette_label)
+# n_classes_label = len(conf.one_hot_palette_label)
+palette_label = [[np.array(labels[k].color)] for k in range(len(labels)) if labels[k].trainId > 0 and labels[k].trainId < 255]
+n_classes_label = len(palette_label)
 
 # data augmentation setting
 
@@ -129,7 +135,8 @@ def parse_sample(input_files, label_file):
     label = utils.load_image_op(label_file)
     label = utils.resize_image_op(label, image_shape_original_label, conf.image_shape, interpolation=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
     # one hot encode the seg_mask
-    label = utils.one_hot_op(label, conf.num_classes)
+    # label = utils.one_hot_gray_op(label, conf.num_classes)
+    label = utils.one_hot_encode_label_op(label, palette_label)
     return input, label
 
 
@@ -205,6 +212,7 @@ metrics = [tf.keras.metrics.CategoricalAccuracy(), MeanIoU(conf.num_classes)]
 
 # compile the model
 model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
+print("Compiled model *{}_based_on_{}*".format(conf.model, base_model))
 
 
 # callbacks setting
@@ -214,12 +222,12 @@ validation_steps = len(files_valid_input) // conf.valid_batch_size              
 # create callbacks to be called after each epoch
 tensorboard_cb      = tf.keras.callbacks.TensorBoard(paths['logs_path'], update_freq="epoch", profile_batch=0)
 csvlogger_cb        = tf.keras.callbacks.CSVLogger(os.path.join(paths['checkpoints_path'], "log.csv"), append=True, separator=',')
-checkpoint_cb       = tf.keras.callbacks.ModelCheckpoint(filepath=os.path.join(paths['checkpoints_path'],
-                                                                               '{model}_based_on_{base}_'.format(model=conf.model, base=base_model) +
-                                                                               'ep_{epoch:02d}.hdf5'),
-                                                                            #    'miou_{val_mean_io_u:04f}_' + 'ep_{epoch:02d}.hdf5'),
+checkpoint_cb       = tf.keras.callbacks.ModelCheckpoint(os.path.join(paths['checkpoints_path'],
+                                                                      '{model}_based_on_{base}_'.format(model=conf.model, base=base_model) + 
+                                                                    #   'miou_{val_mean_io_u:04f}_' + 
+                                                                      'ep_{epoch:02d}.hdf5'),
                                                          save_freq=conf.checkpoint_freq, save_weights_only=True)
-best_checkpoint_cb  = tf.keras.callbacks.ModelCheckpoint(filepath=os.path.join(paths['checkpoints_path'], 'best_weights.hdf5'),
+best_checkpoint_cb  = tf.keras.callbacks.ModelCheckpoint(os.path.join(paths['checkpoints_path'], 'best_weights.hdf5'),
                                                          save_best_only=True, monitor="val_mean_io_u", mode="max", save_weights_only=True)
 early_stopping_cb   = tf.keras.callbacks.EarlyStopping(monitor="val_mean_io_u", mode="max", patience=conf.early_stopping_patience, verbose=1)
 lr_scheduler_cb     = LearningRateScheduler(lr_decay, conf.learning_rate, conf.lr_warmup, steps_per_epoch, verbose=1)
@@ -252,11 +260,11 @@ print("")
 
 
 # training
-model.fit_generator(dataTrain,
-                    epochs=conf.epochs, initial_epoch=conf.initial_epoch, steps_per_epoch=steps_per_epoch,
-                    validation_data=dataValid, validation_steps=validation_steps, validation_freq=conf.validation_freq,
-                    # max_queue_size=10, workers=os.cpu_count(), use_multiprocessing=False,
-                    callbacks=callbacks)
+model.fit(dataTrain,
+          epochs=conf.epochs, initial_epoch=conf.initial_epoch, steps_per_epoch=steps_per_epoch,
+          validation_data=dataValid, validation_steps=validation_steps, validation_freq=conf.validation_freq,
+          # max_queue_size=10, workers=os.cpu_count(), use_multiprocessing=False,
+          callbacks=callbacks)
 
 # save weights
 model.save(filepath=os.path.join(paths['weights_path'], '{model}_based_on_{base_model}.h5'.format(model=conf.model, base_model=base_model)))
