@@ -12,6 +12,7 @@ import warnings
 import csv
 import os
 import tensorflow as tf
+from datetime import datetime
 from tqdm import tqdm
 
 utils = tf.keras.utils
@@ -74,6 +75,8 @@ def check_dataset_path(dataset_path):
 
 def check_related_path(output_dir):
     assert os.path.exists(output_dir)
+
+    output_dir = os.path.join(output_dir, datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
 
     checkpoints_path = os.path.join(output_dir, 'checkpoints')
     logs_path = os.path.join(checkpoints_path, 'logs')
