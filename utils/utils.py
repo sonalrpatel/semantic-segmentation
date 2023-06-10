@@ -8,12 +8,14 @@ The implementation of some utils.
 """
 from keras_preprocessing import image as keras_image
 from PIL import Image
+import sys
 import numpy as np
 import tensorflow as tf
 import xml.etree.ElementTree as xmlET
 import cv2
 import glob
 import os
+import importlib
 
 
 def abspath(path):
@@ -208,7 +210,7 @@ def random_channel_shift(image, label, channel_shift_range):
     return image, label
 
 
-def one_hot_gray(label, num_classes):
+def one_hot_encode_gray(label, num_classes):
     if np.ndim(label) == 3 and label.shape[2] == 1:
         label = np.squeeze(label, axis=-1)
     if np.ndim(label) == 3 and label.shape[2] > 1:
@@ -221,7 +223,7 @@ def one_hot_gray(label, num_classes):
     return heat_map
 
 
-def one_hot_gray_op(label, num_classes):
+def one_hot_encode_gray_op(label, num_classes):
     if len(list(label.shape)) == 3 and label.shape[2] == 1:
         label = tf.squeeze(label, axis=-1)
     if len(list(label.shape)) == 3 and label.shape[2] > 1:
@@ -272,6 +274,19 @@ def parse_convert_xml(conversion_file_path):
             class_list.append(to_class)
 
     return one_hot_palette
+
+
+def parse_convert_py(conversion_file_path):
+    module_name = os.path.splitext(os.path.basename(conversion_file_path))[0]
+    module_path = os.path.abspath(os.path.expanduser(conversion_file_path))
+    module_dir = os.path.dirname(module_path)
+    sys.path.append(module_dir)
+    module = importlib.import_module(module_name, package=module_path)
+
+    labels = module.labels
+    one_hot_palette_label = [[np.array(labels[k].color)] for k in range(len(labels)) if labels[k].trainId > 0 and labels[k].trainId < 255]
+
+    return one_hot_palette_label
 
 
 # adamw utils

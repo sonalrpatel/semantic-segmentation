@@ -108,10 +108,8 @@ files_valid_label = np.take(files_valid_label, idcs)
 print(f"Found {len(files_valid_label)} validation samples")
 
 # parse one-hot-conversion.xml
-conf.one_hot_palette_label = utils.parse_convert_xml(conf.one_hot_palette_label)
-# n_classes_label = len(conf.one_hot_palette_label)
-palette_label = [[np.array(labels[k].color)] for k in range(len(labels)) if labels[k].trainId > 0 and labels[k].trainId < 255]
-n_classes_label = len(palette_label)
+conf.one_hot_palette_label = utils.parse_convert_py(conf.one_hot_palette_label)
+assert conf.num_classes == len(conf.one_hot_palette_label)
 
 
 def one_hot_encode_label_op(image, palette):

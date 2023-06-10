@@ -10,12 +10,13 @@ The file defines the training process.
 from utils.helpers import check_related_path
 from utils.callbacks import LearningRateScheduler
 from utils.optimizers import *
-from utils.losses import *
 from utils.learning_rate import *
 from utils.metrics import MeanIoU
+from utils.losses import *
+from utils.lossfunc import *
+from utils.loss_functions import *
 from utils import utils
 from builders import model_builder
-from config.labels import labels
 import tensorflow as tf
 import configargparse
 import os
@@ -34,7 +35,7 @@ def str2bool(v):
 parser = configargparse.ArgParser()
 parser.add("-c",    "--config",     is_config_file=True,    default="config/config.semseg.cityscapes.yml", help="config file")
 # parser.add("-c",    "--config",                     is_config_file=True,                        help="config file")
-parser.add("-d",    "--dataset",                    type=str,       default="CamVid",           help="the path of the dataset")
+parser.add("-d",    "--dataset",                    type=str,       default="CamVid",           help="the name of the dataset")
 parser.add("-it",   "--input_training",             type=str,       required=True,              help="directory/directories of input samples for training")
 parser.add("-lt",   "--label_training",             type=str,       required=True,              help="directory of label samples for training")
 parser.add("-nt",   "--max_samples_training",       type=int,       default=None,               help="maximum number of training samples")
@@ -115,10 +116,8 @@ files_valid_label = np.take(files_valid_label, idcs)
 print(f"Found {len(files_valid_label)} validation samples")
 
 # parse one-hot-conversion.xml
-conf.one_hot_palette_label = utils.parse_convert_xml(conf.one_hot_palette_label)
-# n_classes_label = len(conf.one_hot_palette_label)
-palette_label = [[np.array(labels[k].color)] for k in range(len(labels)) if labels[k].trainId > 0 and labels[k].trainId < 255]
-n_classes_label = len(palette_label)
+conf.one_hot_palette_label = utils.parse_convert_py(conf.one_hot_palette_label)
+assert conf.num_classes == len(conf.one_hot_palette_label)
 
 # data augmentation setting
 
@@ -134,9 +133,9 @@ def parse_sample(input_files, label_file):
     # parse and process label image
     label = utils.load_image_op(label_file)
     label = utils.resize_image_op(label, image_shape_original_label, conf.image_shape, interpolation=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
-    # one hot encode the seg_mask
-    # label = utils.one_hot_gray_op(label, conf.num_classes)
-    label = utils.one_hot_encode_label_op(label, palette_label)
+    # one hot encode the label
+    # label = utils.one_hot_encode_gray_op(label, conf.num_classes)
+    label = utils.one_hot_encode_label_op(label, conf.one_hot_palette_label)
     return input, label
 
 
@@ -174,7 +173,24 @@ if conf.model_weights is not None:
 losses = {'ce': categorical_crossentropy_with_logits,
           'focal_loss': focal_loss(),
           'miou_loss': miou_loss(num_classes=conf.num_classes),
-          'self_balanced_focal_loss': self_balanced_focal_loss()}
+          'self_balanced_focal_loss': self_balanced_focal_loss(),
+
+          'iou_loss': LossFunc(conf.num_classes).iou_loss,
+          'dice_loss': LossFunc(conf.num_classes).dice_loss,
+          'ce_iou_loss': LossFunc(conf.num_classes).CEIoU_loss,
+          'ce_dice_loss': LossFunc(conf.num_classes).CEDice_loss,
+          
+          'wce_loss': Semantic_loss_functions().weighted_cross_entropyloss,
+          'focal_loss_2': Semantic_loss_functions().focal_loss,
+          'dice_loss_2': Semantic_loss_functions().dice_loss,
+          'bce_dice_loss': Semantic_loss_functions().bce_dice_loss,
+          'tversky_loss': Semantic_loss_functions().tversky_loss,
+          'log_cosh_dice_loss': Semantic_loss_functions().log_cosh_dice_loss,
+          'jacard_loss': Semantic_loss_functions().jacard_loss,
+          'ssim_loss': Semantic_loss_functions().ssim_loss,
+          'unet3p_hybrid_loss': Semantic_loss_functions().unet3p_hybrid_loss,
+          'basnet_hybrid_loss': Semantic_loss_functions().basnet_hybrid_loss}
+
 loss = losses[conf.loss] if conf.loss is not None else categorical_crossentropy_with_logits
 
 # chose optimizer
@@ -226,16 +242,17 @@ checkpoint_cb       = tf.keras.callbacks.ModelCheckpoint(os.path.join(paths['che
                                                                       '{model}_based_on_{base}_'.format(model=conf.model, base=base_model) + 
                                                                     #   'miou_{val_mean_io_u:04f}_' + 
                                                                       'ep_{epoch:02d}.hdf5'),
-                                                         save_freq=conf.checkpoint_freq, save_weights_only=True)
+                                                         save_freq=conf.checkpoint_freq*steps_per_epoch, save_weights_only=True)
 best_checkpoint_cb  = tf.keras.callbacks.ModelCheckpoint(os.path.join(paths['checkpoints_path'], 'best_weights.hdf5'),
                                                          save_best_only=True, monitor="val_mean_io_u", mode="max", save_weights_only=True)
 early_stopping_cb   = tf.keras.callbacks.EarlyStopping(monitor="val_mean_io_u", mode="max", patience=conf.early_stopping_patience, verbose=1)
 lr_scheduler_cb     = LearningRateScheduler(lr_decay, conf.learning_rate, conf.lr_warmup, steps_per_epoch, verbose=1)
-callbacks = [tensorboard_cb, csvlogger_cb, checkpoint_cb, best_checkpoint_cb, early_stopping_cb, lr_scheduler_cb]
+callbacks           = [tensorboard_cb, csvlogger_cb, checkpoint_cb, best_checkpoint_cb, early_stopping_cb, lr_scheduler_cb]
 
 
 # begin training
 print("\n***** Begin training *****")
+print("GPU -->", tf.config.list_physical_devices('GPU'))
 print("Dataset -->", conf.dataset)
 print("Num Images -->", len(files_train_input))
 print("Model -->", conf.model)
@@ -247,6 +264,12 @@ print("Initial Epoch -->", conf.initial_epoch)
 print("Batch Size -->", conf.batch_size)
 print("Num Classes -->", conf.num_classes)
 
+print("")
+print("Model Configuration:")
+print("\tLoss -->", conf.loss)
+print("\tOptimizer -->", conf.optimizer)
+
+print("")
 print("Data Augmentation:")
 print("\tData Augmentation Rate -->", conf.data_aug_rate)
 print("\tVertical Flip -->", conf.v_flip)
