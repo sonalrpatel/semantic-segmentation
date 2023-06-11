@@ -77,220 +77,234 @@ parser.add("-bn",   "--brightness",                 type=float,     default=None
 parser.add("-zr",   "--zoom_range",                 type=float,     default=0.0, nargs="+",     help="the times for zooming the image")
 parser.add("-cs",   "--channel_shift",              type=float,     default=0.0,                help="the channel shift range")
 
-conf, unknown = parser.parse_known_args()
+
+def train(*args):
+    # read CLI
+    conf, unknown = parser.parse_known_args()
+
+    # check args
+    if len(args) != 0:
+        assert len(args) == 2
+        
+        # update model per input from main
+        if args[0] == 'model':
+            conf.model = args[1]
+
+    # determine absolute filepaths
+    conf.input_training   = utils.abspath(conf.input_training)
+    conf.label_training   = utils.abspath(conf.label_training)
+    conf.input_validation = utils.abspath(conf.input_validation)
+    conf.label_validation = utils.abspath(conf.label_validation)
+    conf.model_weights    = utils.abspath(conf.model_weights) if conf.model_weights is not None else conf.model_weights
+    conf.output_dir       = utils.abspath(conf.output_dir)
+
+    # check related paths
+    paths = check_related_path(conf.output_dir)
 
 
-# determine absolute filepaths
-conf.input_training   = utils.abspath(conf.input_training)
-conf.label_training   = utils.abspath(conf.label_training)
-conf.input_validation = utils.abspath(conf.input_validation)
-conf.label_validation = utils.abspath(conf.label_validation)
-conf.model_weights    = utils.abspath(conf.model_weights) if conf.model_weights is not None else conf.model_weights
-conf.output_dir       = utils.abspath(conf.output_dir)
+    # get image and label file names for training and validation
+    # get max_samples_training random training samples
+    # TODO: consider images and labels when there names matches
+    files_train_input = utils.get_files_recursive(conf.input_training)
+    files_train_label = utils.get_files_recursive(conf.label_training, "color")
+    _, idcs = utils.sample_list(files_train_label, n_samples=conf.max_samples_training)
+    files_train_input = np.take(files_train_input, idcs)
+    files_train_label = np.take(files_train_label, idcs)
+    image_shape_original_input = utils.load_image(files_train_input[0]).shape[0:2]
+    image_shape_original_label = utils.load_image(files_train_label[0]).shape[0:2]
+    print(f"Found {len(files_train_label)} training samples")
+
+    # get max_samples_validation random validation samples
+    files_valid_input = utils.get_files_recursive(conf.input_validation)
+    files_valid_label = utils.get_files_recursive(conf.label_validation, "color")
+    _, idcs = utils.sample_list(files_valid_label, n_samples=conf.max_samples_validation)
+    files_valid_input = np.take(files_valid_input, idcs)
+    files_valid_label = np.take(files_valid_label, idcs)
+    print(f"Found {len(files_valid_label)} validation samples")
+
+    # parse one-hot-conversion.xml
+    _, conf.one_hot_palette_label = utils.parse_convert_py(conf.one_hot_palette_label)
+    assert conf.num_classes == len(conf.one_hot_palette_label)
 
 
-# check related paths
-paths = check_related_path(conf.output_dir)
+    # data augmentation setting
+
+    # data generator
+    # build dataset pipeline parsing functions
+    def parse_sample(input_files, label_file):
+        # parse and process input images
+        input = utils.load_image_op(input_files)
+        input = utils.resize_image_op(input, image_shape_original_input, conf.image_shape, interpolation=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+        # normalise the image
+        input = utils.normalise_image_op(input)
+        
+        # parse and process label image
+        label = utils.load_image_op(label_file)
+        label = utils.resize_image_op(label, image_shape_original_label, conf.image_shape, interpolation=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+        # one hot encode the label
+        # label = utils.one_hot_encode_gray_op(label, conf.num_classes)
+        label = utils.one_hot_encode_label_op(label, conf.one_hot_palette_label)
+        return input, label
 
 
-# get image and label file names for training and validation
-# get max_samples_training random training samples
-# TODO: consider images and labels when there names matches
-files_train_input = utils.get_files_recursive(conf.input_training)
-files_train_label = utils.get_files_recursive(conf.label_training, "color")
-_, idcs = utils.sample_list(files_train_label, n_samples=conf.max_samples_training)
-files_train_input = np.take(files_train_input, idcs)
-files_train_label = np.take(files_train_label, idcs)
-image_shape_original_input = utils.load_image(files_train_input[0]).shape[0:2]
-image_shape_original_label = utils.load_image(files_train_label[0]).shape[0:2]
-print(f"Found {len(files_train_label)} training samples")
+    # build training data pipeline
+    dataTrain = tf.data.Dataset.from_tensor_slices((files_train_input, files_train_label))
+    dataTrain = dataTrain.shuffle(buffer_size=conf.max_samples_training, reshuffle_each_iteration=True)
+    dataTrain = dataTrain.map(parse_sample, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    dataTrain = dataTrain.batch(conf.batch_size, drop_remainder=True)
+    dataTrain = dataTrain.repeat(conf.epochs)
+    dataTrain = dataTrain.prefetch(1)
+    print("Built data pipeline for training")
 
-# get max_samples_validation random validation samples
-files_valid_input = utils.get_files_recursive(conf.input_validation)
-files_valid_label = utils.get_files_recursive(conf.label_validation, "color")
-_, idcs = utils.sample_list(files_valid_label, n_samples=conf.max_samples_validation)
-files_valid_input = np.take(files_valid_input, idcs)
-files_valid_label = np.take(files_valid_label, idcs)
-print(f"Found {len(files_valid_label)} validation samples")
-
-# parse one-hot-conversion.xml
-_, conf.one_hot_palette_label = utils.parse_convert_py(conf.one_hot_palette_label)
-assert conf.num_classes == len(conf.one_hot_palette_label)
-
-# data augmentation setting
-
-# data generator
-# build dataset pipeline parsing functions
-def parse_sample(input_files, label_file):
-    # parse and process input images
-    input = utils.load_image_op(input_files)
-    input = utils.resize_image_op(input, image_shape_original_input, conf.image_shape, interpolation=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
-    # normalise the image
-    input = utils.normalise_image_op(input)
-    
-    # parse and process label image
-    label = utils.load_image_op(label_file)
-    label = utils.resize_image_op(label, image_shape_original_label, conf.image_shape, interpolation=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
-    # one hot encode the label
-    # label = utils.one_hot_encode_gray_op(label, conf.num_classes)
-    label = utils.one_hot_encode_label_op(label, conf.one_hot_palette_label)
-    return input, label
+    # build validation data pipeline
+    dataValid = tf.data.Dataset.from_tensor_slices((files_valid_input, files_valid_label))
+    dataValid = dataValid.map(parse_sample, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    dataValid = dataValid.batch(conf.valid_batch_size, drop_remainder=True)
+    dataValid = dataValid.repeat(conf.epochs)
+    dataValid = dataValid.prefetch(1)
+    print("Built data pipeline for validation")
 
 
-# build training data pipeline
-dataTrain = tf.data.Dataset.from_tensor_slices((files_train_input, files_train_label))
-dataTrain = dataTrain.shuffle(buffer_size=conf.max_samples_training, reshuffle_each_iteration=True)
-dataTrain = dataTrain.map(parse_sample, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-dataTrain = dataTrain.batch(conf.batch_size, drop_remainder=True)
-dataTrain = dataTrain.repeat(conf.epochs)
-dataTrain = dataTrain.prefetch(1)
-print("Built data pipeline for training")
+    # build the model
+    model, conf.base_model = model_builder(conf.num_classes, (conf.image_shape[0], conf.image_shape[1]), conf.model, conf.base_model)
 
-# build validation data pipeline
-dataValid = tf.data.Dataset.from_tensor_slices((files_valid_input, files_valid_label))
-dataValid = dataValid.map(parse_sample, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-dataValid = dataValid.batch(conf.valid_batch_size, drop_remainder=True)
-dataValid = dataValid.repeat(conf.epochs)
-dataValid = dataValid.prefetch(1)
-print("Built data pipeline for validation")
+    # summary
+    model.summary()
+
+    # load weights
+    if conf.model_weights is not None:
+        print('Loading the weights...')
+        model.load_weights(conf.model_weights)
 
 
-# build the model
-model, conf.base_model = model_builder(conf.num_classes, (conf.image_shape[0], conf.image_shape[1]), conf.model, conf.base_model)
+    # choose loss
+    losses = {'ce': categorical_crossentropy_with_logits,
+            'focal_loss': focal_loss(),
+            'miou_loss': miou_loss(num_classes=conf.num_classes),
+            'self_balanced_focal_loss': self_balanced_focal_loss(),
 
-# summary
-model.summary()
+            'iou_loss': LossFunc(conf.num_classes).iou_loss,
+            'dice_loss': LossFunc(conf.num_classes).dice_loss,
+            'ce_iou_loss': LossFunc(conf.num_classes).CEIoU_loss,
+            'ce_dice_loss': LossFunc(conf.num_classes).CEDice_loss,
+            
+            'wce_loss': Semantic_loss_functions().weighted_cross_entropyloss,
+            'focal_loss_2': Semantic_loss_functions().focal_loss,
+            'dice_loss_2': Semantic_loss_functions().dice_loss,
+            'bce_dice_loss': Semantic_loss_functions().bce_dice_loss,
+            'tversky_loss': Semantic_loss_functions().tversky_loss,
+            'log_cosh_dice_loss': Semantic_loss_functions().log_cosh_dice_loss,
+            'jacard_loss': Semantic_loss_functions().jacard_loss,
+            'ssim_loss': Semantic_loss_functions().ssim_loss,
+            'unet3p_hybrid_loss': Semantic_loss_functions().unet3p_hybrid_loss,
+            'basnet_hybrid_loss': Semantic_loss_functions().basnet_hybrid_loss}
 
-# load weights
-if conf.model_weights is not None:
-    print('Loading the weights...')
-    model.load_weights(conf.model_weights)
+    loss = losses[conf.loss] if conf.loss is not None else categorical_crossentropy_with_logits
 
+    # chose optimizer
+    total_iterations = len(files_train_input) * conf.epochs // conf.batch_size
+    wd_dict = utils.get_weight_decays(model)
+    ordered_values = []
+    weight_decays = utils.fill_dict_in_order(wd_dict, ordered_values)
 
-# choose loss
-losses = {'ce': categorical_crossentropy_with_logits,
-          'focal_loss': focal_loss(),
-          'miou_loss': miou_loss(num_classes=conf.num_classes),
-          'self_balanced_focal_loss': self_balanced_focal_loss(),
+    optimizers = {'adam': tf.keras.optimizers.Adam(learning_rate=conf.learning_rate),
+                'nadam': tf.keras.optimizers.Nadam(learning_rate=conf.learning_rate),
+                'sgd': tf.keras.optimizers.SGD(learning_rate=conf.learning_rate, momentum=0.99),
+                #   'adamw': AdamW(learning_rate=conf.learning_rate, batch_size=conf.batch_size,
+                #                  total_iterations=total_iterations),
+                #   'nadamw': NadamW(learning_rate=conf.learning_rate, batch_size=conf.batch_size,
+                #                    total_iterations=total_iterations),
+                #   'sgdw': SGDW(learning_rate=conf.learning_rate, momentum=0.99, batch_size=conf.batch_size,
+                #                total_iterations=total_iterations)
+                }
+    optimizer = optimizers[conf.optimizer]
 
-          'iou_loss': LossFunc(conf.num_classes).iou_loss,
-          'dice_loss': LossFunc(conf.num_classes).dice_loss,
-          'ce_iou_loss': LossFunc(conf.num_classes).CEIoU_loss,
-          'ce_dice_loss': LossFunc(conf.num_classes).CEDice_loss,
-          
-          'wce_loss': Semantic_loss_functions().weighted_cross_entropyloss,
-          'focal_loss_2': Semantic_loss_functions().focal_loss,
-          'dice_loss_2': Semantic_loss_functions().dice_loss,
-          'bce_dice_loss': Semantic_loss_functions().bce_dice_loss,
-          'tversky_loss': Semantic_loss_functions().tversky_loss,
-          'log_cosh_dice_loss': Semantic_loss_functions().log_cosh_dice_loss,
-          'jacard_loss': Semantic_loss_functions().jacard_loss,
-          'ssim_loss': Semantic_loss_functions().ssim_loss,
-          'unet3p_hybrid_loss': Semantic_loss_functions().unet3p_hybrid_loss,
-          'basnet_hybrid_loss': Semantic_loss_functions().basnet_hybrid_loss}
+    # lr schedule strategy
+    if conf.lr_warmup and conf.epochs - 5 <= 0:
+        raise ValueError('epochs must be larger than 5 if lr warm up is used.')
 
-loss = losses[conf.loss] if conf.loss is not None else categorical_crossentropy_with_logits
+    lr_decays = {'step_decay': step_decay(conf.learning_rate, conf.epochs - 5 if conf.lr_warmup else conf.epochs,
+                                        warmup=conf.lr_warmup),
+                'poly_decay': poly_decay(conf.learning_rate, conf.epochs - 5 if conf.lr_warmup else conf.epochs,
+                                        warmup=conf.lr_warmup),
+                'cosine_decay': cosine_decay(conf.epochs - 5 if conf.lr_warmup else conf.epochs,
+                                            conf.learning_rate, warmup=conf.lr_warmup)}
+    lr_decay = lr_decays[conf.lr_scheduler]
 
-# chose optimizer
-total_iterations = len(files_train_input) * conf.epochs // conf.batch_size
-wd_dict = utils.get_weight_decays(model)
-ordered_values = []
-weight_decays = utils.fill_dict_in_order(wd_dict, ordered_values)
+    # metrics
+    metrics = [tf.keras.metrics.CategoricalAccuracy(), MeanIoU(conf.num_classes)]
 
-optimizers = {'adam': tf.keras.optimizers.Adam(learning_rate=conf.learning_rate),
-              'nadam': tf.keras.optimizers.Nadam(learning_rate=conf.learning_rate),
-              'sgd': tf.keras.optimizers.SGD(learning_rate=conf.learning_rate, momentum=0.99),
-            #   'adamw': AdamW(learning_rate=conf.learning_rate, batch_size=conf.batch_size,
-            #                  total_iterations=total_iterations),
-            #   'nadamw': NadamW(learning_rate=conf.learning_rate, batch_size=conf.batch_size,
-            #                    total_iterations=total_iterations),
-            #   'sgdw': SGDW(learning_rate=conf.learning_rate, momentum=0.99, batch_size=conf.batch_size,
-            #                total_iterations=total_iterations)
-            }
-optimizer = optimizers[conf.optimizer]
-
-# lr schedule strategy
-if conf.lr_warmup and conf.epochs - 5 <= 0:
-    raise ValueError('epochs must be larger than 5 if lr warm up is used.')
-
-lr_decays = {'step_decay': step_decay(conf.learning_rate, conf.epochs - 5 if conf.lr_warmup else conf.epochs,
-                                      warmup=conf.lr_warmup),
-             'poly_decay': poly_decay(conf.learning_rate, conf.epochs - 5 if conf.lr_warmup else conf.epochs,
-                                      warmup=conf.lr_warmup),
-             'cosine_decay': cosine_decay(conf.epochs - 5 if conf.lr_warmup else conf.epochs,
-                                          conf.learning_rate, warmup=conf.lr_warmup)}
-lr_decay = lr_decays[conf.lr_scheduler]
-
-# metrics
-metrics = [tf.keras.metrics.CategoricalAccuracy(), MeanIoU(conf.num_classes)]
-
-# compile the model
-model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
-print("Compiled model *{}_based_on_{}*".format(conf.model, conf.base_model))
+    # compile the model
+    model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
+    print("Compiled model *{}_based_on_{}*".format(conf.model, conf.base_model))
 
 
-# callbacks setting
-# training and validation steps
-steps_per_epoch = len(files_train_input) // conf.batch_size if not conf.steps_per_epoch else conf.steps_per_epoch   # n_batches_train
-validation_steps = len(files_valid_input) // conf.valid_batch_size                                                  # n_batches_valid
-# create callbacks to be called after each epoch
-tensorboard_cb      = tf.keras.callbacks.TensorBoard(paths['logs_path'], update_freq="epoch", profile_batch=0)
-csvlogger_cb        = tf.keras.callbacks.CSVLogger(os.path.join(paths['checkpoints_path'], "log.csv"), append=True, separator=',')
-checkpoint_cb       = tf.keras.callbacks.ModelCheckpoint(os.path.join(paths['checkpoints_path'],
-                                                                      '{model}_based_on_{base}_'.format(model=conf.model, base=conf.base_model) + 
-                                                                    #   'miou_{val_mean_io_u:04f}_' + 
-                                                                      'ep_{epoch:02d}.hdf5'),
-                                                         save_freq=conf.checkpoint_freq*steps_per_epoch, save_weights_only=True)
-best_checkpoint_cb  = tf.keras.callbacks.ModelCheckpoint(os.path.join(paths['checkpoints_path'], 'best_weights.hdf5'),
-                                                         save_best_only=True, monitor="val_mean_io_u", mode="max", save_weights_only=True)
-early_stopping_cb   = tf.keras.callbacks.EarlyStopping(monitor="val_mean_io_u", mode="max", patience=conf.early_stopping_patience, verbose=1)
-lr_scheduler_cb     = LearningRateScheduler(lr_decay, conf.learning_rate, conf.lr_warmup, steps_per_epoch, verbose=1)
-callbacks           = [tensorboard_cb, csvlogger_cb, checkpoint_cb, best_checkpoint_cb, early_stopping_cb, lr_scheduler_cb]
+    # callbacks setting
+    # training and validation steps
+    steps_per_epoch = len(files_train_input) // conf.batch_size if not conf.steps_per_epoch else conf.steps_per_epoch   # n_batches_train
+    validation_steps = len(files_valid_input) // conf.valid_batch_size                                                  # n_batches_valid
+    # create callbacks to be called after each epoch
+    tensorboard_cb      = tf.keras.callbacks.TensorBoard(paths['logs_path'], update_freq="epoch", profile_batch=0)
+    csvlogger_cb        = tf.keras.callbacks.CSVLogger(os.path.join(paths['checkpoints_path'], "log.csv"), append=True, separator=',')
+    checkpoint_cb       = tf.keras.callbacks.ModelCheckpoint(os.path.join(paths['checkpoints_path'],
+                                                                        '{model}_based_on_{base}_'.format(model=conf.model, base=conf.base_model) + 
+                                                                        #   'miou_{val_mean_io_u:04f}_' + 
+                                                                        'ep_{epoch:02d}.hdf5'),
+                                                            save_freq=conf.checkpoint_freq*steps_per_epoch, save_weights_only=True)
+    best_checkpoint_cb  = tf.keras.callbacks.ModelCheckpoint(os.path.join(paths['checkpoints_path'], 'best_weights.hdf5'),
+                                                            save_best_only=True, monitor="val_mean_io_u", mode="max", save_weights_only=True)
+    early_stopping_cb   = tf.keras.callbacks.EarlyStopping(monitor="val_mean_io_u", mode="max", patience=conf.early_stopping_patience, verbose=1)
+    lr_scheduler_cb     = LearningRateScheduler(lr_decay, conf.learning_rate, conf.lr_warmup, steps_per_epoch, verbose=1)
+    callbacks           = [tensorboard_cb, csvlogger_cb, checkpoint_cb, best_checkpoint_cb, early_stopping_cb, lr_scheduler_cb]
 
 
-# begin training
-print("\n***** Begin training *****")
-print("GPU -->", tf.config.list_physical_devices('GPU'))
-print("Dataset -->", conf.dataset)
-print("Num Images -->", len(files_train_input))
-print("Model -->", conf.model)
-print("Base Model -->", conf.base_model)
-print("Image Shape -->", [conf.image_shape[0], conf.image_shape[1]])
-print("Num Epochs -->", conf.epochs)
-print("Initial Epoch -->", conf.initial_epoch)
-print("Batch Size -->", conf.batch_size)
-print("Num Classes -->", conf.num_classes)
+    # begin training
+    print("\n***** Begin training *****")
+    print("GPU -->", tf.config.list_physical_devices('GPU'))
+    print("Dataset -->", conf.dataset)
+    print("Num Images -->", len(files_train_input))
+    print("Model -->", conf.model)
+    print("Base Model -->", conf.base_model)
+    print("Image Shape -->", [conf.image_shape[0], conf.image_shape[1]])
+    print("Num Epochs -->", conf.epochs)
+    print("Initial Epoch -->", conf.initial_epoch)
+    print("Batch Size -->", conf.batch_size)
+    print("Num Classes -->", conf.num_classes)
 
-print("")
-print("Model Configuration:")
-print("\tLoss -->", conf.loss)
-print("\tOptimizer -->", conf.optimizer)
+    print("")
+    print("Model Configuration:")
+    print("\tLoss -->", conf.loss)
+    print("\tOptimizer -->", conf.optimizer)
 
-print("")
-print("Data Augmentation:")
-print("\tData Augmentation Rate -->", conf.data_aug_rate)
-print("\tVertical Flip -->", conf.v_flip)
-print("\tHorizontal Flip -->", conf.h_flip)
-print("\tBrightness Alteration -->", conf.brightness)
-print("\tRotation -->", conf.rotation)
-print("\tZoom -->", conf.zoom_range)
-print("\tChannel Shift -->", conf.channel_shift)
+    print("")
+    print("Data Augmentation:")
+    print("\tData Augmentation Rate -->", conf.data_aug_rate)
+    print("\tVertical Flip -->", conf.v_flip)
+    print("\tHorizontal Flip -->", conf.h_flip)
+    print("\tBrightness Alteration -->", conf.brightness)
+    print("\tRotation -->", conf.rotation)
+    print("\tZoom -->", conf.zoom_range)
+    print("\tChannel Shift -->", conf.channel_shift)
 
-print("")
-
-
-# writing config into text file
-with open(paths['config_path'], 'w') as f:
-    for key, value in vars(conf).items():
-        f.write('%s:%s\n' % (key, value))
+    print("")
 
 
-# training
-model.fit(dataTrain,
-          epochs=conf.epochs, initial_epoch=conf.initial_epoch, steps_per_epoch=steps_per_epoch,
-          validation_data=dataValid, validation_steps=validation_steps, validation_freq=conf.validation_freq,
-          # max_queue_size=10, workers=os.cpu_count(), use_multiprocessing=False,
-          callbacks=callbacks)
+    # writing config into text file
+    with open(paths['config_path'], 'w') as f:
+        for key, value in vars(conf).items():
+            f.write('%s:%s\n' % (key, value))
 
-# save weights
-model.save(filepath=os.path.join(paths['weights_path'], '{model}_based_on_{base_model}.h5'.format(model=conf.model, base_model=conf.base_model)))
+
+    # training
+    model.fit(dataTrain,
+            epochs=conf.epochs, initial_epoch=conf.initial_epoch, steps_per_epoch=steps_per_epoch,
+            validation_data=dataValid, validation_steps=validation_steps, validation_freq=conf.validation_freq,
+            # max_queue_size=10, workers=os.cpu_count(), use_multiprocessing=False,
+            callbacks=callbacks)
+
+    # save weights
+    model.save(filepath=os.path.join(paths['weights_path'], '{model}_based_on_{base_model}.h5'.format(model=conf.model, base_model=conf.base_model)))
+
+
+if __name__ == "__main__":
+    train()

@@ -8,22 +8,22 @@ The model builder to build different semantic segmentation models.
 """
 from models import *
 
+models = {'FCN-8s': FCN,
+          'FCN-16s': FCN,
+          'FCN-32s': FCN,
+          'UNet': UNet,
+          'SegNet': SegNet,
+          'Bayesian-SegNet': SegNet,
+          'PAN': PAN,
+          'PSPNet': PSPNet,
+          'RefineNet': RefineNet,
+          'DenseASPP': DenseASPP,
+          'DeepLabV3': DeepLabV3,
+          'DeepLabV3Plus': DeepLabV3Plus,
+          'BiSegNet': BiSegNet}
+
 
 def model_builder(num_classes, input_size=(256, 256), model='SegNet', base_model=None):
-    models = {'FCN-8s': FCN,
-              'FCN-16s': FCN,
-              'FCN-32s': FCN,
-              'UNet': UNet,
-              'SegNet': SegNet,
-              'Bayesian-SegNet': SegNet,
-              'PAN': PAN,
-              'PSPNet': PSPNet,
-              'RefineNet': RefineNet,
-              'DenseASPP': DenseASPP,
-              'DeepLabV3': DeepLabV3,
-              'DeepLabV3Plus': DeepLabV3Plus,
-              'BiSegNet': BiSegNet}
-
     assert model in models
     assert isinstance(input_size, tuple)
 
