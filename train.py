@@ -72,8 +72,6 @@ parser.add("-ar",   "--data_aug_rate",              type=float,     default=0.0,
 parser.add("-hf",   "--h_flip",                     type=str2bool,  default=False,              help="whether to randomly flip the image horizontally")
 parser.add("-vf",   "--v_flip",                     type=str2bool,  default=False,              help="whether to randomly flip the image vertically")
 parser.add("-rc",   "--random_crop",                type=str2bool,  default=False,              help="whether to randomly crop the image")
-parser.add("-ch",   "--crop_height",                type=int,       default=256,                help="the height to crop the image")
-parser.add("-cw",   "--crop_width",                 type=int,       default=256,                help="the width to crop the image")
 parser.add("-rt",   "--rotation",                   type=float,     default=0.0,                help="the angle to randomly rotate the image")
 parser.add("-bn",   "--brightness",                 type=float,     default=None, nargs="+",    help="randomly change the brightness (list)")
 parser.add("-zr",   "--zoom_range",                 type=float,     default=0.0, nargs="+",     help="the times for zooming the image")
@@ -158,7 +156,7 @@ print("Built data pipeline for validation")
 
 
 # build the model
-model, conf.base_model = model_builder(conf.num_classes, (conf.crop_height, conf.crop_width), conf.model, conf.base_model)
+model, conf.base_model = model_builder(conf.num_classes, (conf.image_shape[0], conf.image_shape[1]), conf.model, conf.base_model)
 
 # summary
 model.summary()
@@ -257,8 +255,7 @@ print("Dataset -->", conf.dataset)
 print("Num Images -->", len(files_train_input))
 print("Model -->", conf.model)
 print("Base Model -->", conf.base_model)
-print("Crop Height -->", conf.crop_height)
-print("Crop Width -->", conf.crop_width)
+print("Image Shape -->", [conf.image_shape[0], conf.image_shape[1]])
 print("Num Epochs -->", conf.epochs)
 print("Initial Epoch -->", conf.initial_epoch)
 print("Batch Size -->", conf.batch_size)
