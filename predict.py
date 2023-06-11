@@ -36,8 +36,7 @@ parser.add_argument('--base_model',             type=str,       default=None,   
 parser.add_argument('--csv_file',               type=str,       default=None,           help='The path of color code csv file.')
 parser.add_argument('--one_hot_palette_label',  type=str,       required=True,          help="xml-file for one-hot-conversion of labels")
 parser.add_argument('--num_classes',            type=int,       required=True,          help='The number of classes to be segmented.')
-parser.add_argument('--crop_height',            type=int,       default=256,            help='The height to crop the image.')
-parser.add_argument('--crop_width',             type=int,       default=256,            help='The width to crop the image.')
+parser.add_argument('--image_shape',            type=int,       required=True, nargs=2, help='The image dimensions (HxW) of inputs and labels for network')
 parser.add_argument('--output_dir',             type=str,       required=True,          help='The output directory for TensorBoard and models')
 parser.add_argument('--weights',                type=str,       required=True,          help='The path of weights to be loaded.')
 parser.add_argument('--input_testing',          type=str,       required=True,          help='The path of predicted image.')
@@ -52,7 +51,7 @@ if not os.path.exists(conf.input_testing):
     raise ValueError('The path \'{input_testing}\' does not exist the image file.'.format(input_testing=conf.input_testing))
 
 # build the model
-model, base_model = model_builder(conf.num_classes, (conf.crop_height, conf.crop_width), conf.model, conf.base_model)
+model, base_model = model_builder(conf.num_classes, (conf.image_shape[0], conf.image_shape[1]), conf.model, conf.base_model)
 
 # load weights
 # check related paths
@@ -78,8 +77,7 @@ else:
 print("\n***** Begin testing *****")
 print("Model -->", conf.model)
 print("Base Model -->", base_model)
-print("Crop Height -->", conf.crop_height)
-print("Crop Width -->", conf.crop_width)
+print("Image Shape -->", [conf.image_shape[0], conf.image_shape[1]])
 print("Num Classes -->", conf.num_classes)
 print("Weights Path -->", conf.weights)
 print("Prediction Path -->", paths['prediction_path'])
@@ -100,8 +98,7 @@ for i, name in enumerate(files_test_input.tolist()):
     sys.stdout.write('\rRunning test image %d / %d'%(i+1, len(files_test_input)))
     sys.stdout.flush()
 
-    image = cv2.resize(utils.load_image(name),
-                       dsize=(conf.crop_width, conf.crop_height))
+    image = cv2.resize(utils.load_image(name), dsize=(conf.image_shape[0], conf.image_shape[1]))
     image = appl.imagenet_utils.preprocess_input(image.astype(np.float32), data_format='channels_last', mode='torch')
 
     # image processing
