@@ -223,12 +223,9 @@ def train(*args):
     if conf.lr_warmup and conf.epochs - 5 <= 0:
         raise ValueError('epochs must be larger than 5 if lr warm up is used.')
 
-    lr_decays = {'step_decay': step_decay(conf.learning_rate, conf.epochs - 5 if conf.lr_warmup else conf.epochs,
-                                        warmup=conf.lr_warmup),
-                'poly_decay': poly_decay(conf.learning_rate, conf.epochs - 5 if conf.lr_warmup else conf.epochs,
-                                        warmup=conf.lr_warmup),
-                'cosine_decay': cosine_decay(conf.epochs - 5 if conf.lr_warmup else conf.epochs,
-                                            conf.learning_rate, warmup=conf.lr_warmup)}
+    lr_decays = {'step_decay': step_decay(conf.learning_rate, conf.epochs, warmup=conf.lr_warmup),
+                'poly_decay': poly_decay(conf.learning_rate, conf.epochs, warmup=conf.lr_warmup),
+                'cosine_decay': cosine_decay(conf.learning_rate, conf.epochs, warmup=conf.lr_warmup)}
     lr_decay = lr_decays[conf.lr_scheduler]
 
     # metrics
@@ -275,6 +272,7 @@ def train(*args):
     print("Model Configuration:")
     print("\tLoss -->", conf.loss)
     print("\tOptimizer -->", conf.optimizer)
+    print("\tLr Scheduler -->", conf.lr_scheduler)
 
     print("")
     print("Data Augmentation:")

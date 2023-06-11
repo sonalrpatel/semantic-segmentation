@@ -44,11 +44,11 @@ def poly_decay(lr=3e-4, max_epochs=100, warmup=False):
     return decay
 
 
-def cosine_decay(max_epochs, max_lr, min_lr=1e-7, warmup=False):
+def cosine_decay(max_lr, max_epochs=100, min_lr=1e-7, warmup=False):
     """
     cosine annealing scheduler.
-    :param max_epochs: max epochs
     :param max_lr: max lr
+    :param max_epochs: max epochs
     :param min_lr: min lr
     :param warmup: warm up or not
     :return: current lr
@@ -56,8 +56,7 @@ def cosine_decay(max_epochs, max_lr, min_lr=1e-7, warmup=False):
     max_epochs = max_epochs - 5 if warmup else max_epochs
 
     def decay(epoch):
-        lrate = min_lr + (max_lr - min_lr) * (
-                1 + np.cos(np.pi * epoch / max_epochs)) / 2
+        lrate = min_lr + (max_lr - min_lr) * (1 + np.cos(np.pi * epoch / max_epochs)) / 2
         return lrate
 
     return decay
