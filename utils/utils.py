@@ -242,6 +242,7 @@ def one_hot_encode_label_op(image, palette):
     one_hot_map = []
 
     for class_colors in palette:
+        class_colors = [np.array(class_colors)]
         class_map = tf.zeros(image.shape[0:2], dtype=tf.int32)
         for color in class_colors:
             # find instances of color and append layer to one-hot-map
@@ -284,9 +285,10 @@ def parse_convert_py(conversion_file_path):
     module = importlib.import_module(module_name, package=module_path)
 
     labels = module.labels
-    one_hot_palette_label = [[np.array(labels[k].color)] for k in range(len(labels)) if labels[k].trainId > 0 and labels[k].trainId < 255]
+    one_hot_palette_label_values = [list(labels[k].color) for k in range(len(labels)) if labels[k].trainId > 0 and labels[k].trainId < 255]
+    one_hot_palette_label_names = [labels[k].name for k in range(len(labels)) if labels[k].trainId > 0 and labels[k].trainId < 255]
 
-    return one_hot_palette_label
+    return one_hot_palette_label_names, one_hot_palette_label_values
 
 
 # adamw utils

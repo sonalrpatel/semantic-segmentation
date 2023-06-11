@@ -36,7 +36,7 @@ parser.add("-lv",   "--label_validation",           type=str,       required=Tru
 parser.add("-nv",   "--max_samples_validation",     type=int,       default=None,               help="maximum number of validation samples")
 parser.add("-is",   "--image_shape",                type=int,       required=True, nargs=2,     help="image dimensions (HxW) of inputs and labels for network")
 parser.add("-nc",   "--num_classes",                type=int,       default=32,                 help="The number of classes to be segmented")
-parser.add("-ohl",  "--one-hot-palette-label",      type=str,       required=True,              help="xml-file for one-hot-conversion of labels")
+parser.add("-ohl",  "--one_hot_palette_label",      type=str,       required=True,              help="xml-file for one-hot-conversion of labels")
 parser.add("-m",    "--model",                      type=str,       required=True,              help="choose the semantic segmentation methods")
 parser.add("-bm",   "--base_model",                 type=str,       default=None,               help="choose the backbone model")
 parser.add("-bt",   "--batch_size",                 type=int,       default=4,                  help="training batch size")
@@ -108,7 +108,7 @@ files_valid_label = np.take(files_valid_label, idcs)
 print(f"Found {len(files_valid_label)} validation samples")
 
 # parse one-hot-conversion.xml
-conf.one_hot_palette_label = utils.parse_convert_py(conf.one_hot_palette_label)
+_, conf.one_hot_palette_label = utils.parse_convert_py(conf.one_hot_palette_label)
 assert conf.num_classes == len(conf.one_hot_palette_label)
 
 

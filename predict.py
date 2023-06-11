@@ -6,16 +6,18 @@ The file defines the predict process of a single RGB image.
 @Project: https://github.com/luyanger1799/amazing-semantic-segmentation
 
 """
+import tensorflow as tf
 from utils.helpers import check_related_path, get_colored_info, color_encode
-from utils.utils import load_image, decode_one_hot
-from keras_applications import imagenet_utils
-from builders import builder
+from utils import utils
 from PIL import Image
+from builders import model_builder
 import numpy as np
-import argparse
+import configargparse
 import sys
 import cv2
 import os
+
+appl = tf.keras.applications
 
 
 def str2bool(v):
@@ -24,76 +26,73 @@ def str2bool(v):
     elif v.lower() in ('no', 'false', 'f', 'n', '0'):
         return False
     else:
-        raise argparse.ArgumentTypeError('Boolean value expected.')
+        raise configargparse.ArgumentTypeError('Boolean value expected.')
 
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--model', help='Choose the semantic segmentation methods.', type=str, required=True)
-parser.add_argument('--base_model', help='Choose the backbone model.', type=str, default=None)
-parser.add_argument('--csv_file', help='The path of color code csv file.', type=str, default=None)
-parser.add_argument('--num_classes', help='The number of classes to be segmented.', type=int, required=True)
-parser.add_argument('--crop_height', help='The height to crop the image.', type=int, default=256)
-parser.add_argument('--crop_width', help='The width to crop the image.', type=int, default=256)
-parser.add_argument('--weights', help='The path of weights to be loaded.', type=str, default=None)
-parser.add_argument('--image_path', help='The path of predicted image.', type=str, required=True)
-parser.add_argument('--color_encode', help='Whether to color encode the prediction.', type=str2bool, default=True)
+parser = configargparse.ArgumentParser()
+parser.add("-c",    "--config",     is_config_file=True,        default="config/config.semseg.cityscapes.yml", help="config file")
+parser.add_argument('--model',                  type=str,       required=True,          help='Choose the semantic segmentation methods.')
+parser.add_argument('--base_model',             type=str,       default=None,           help='Choose the backbone model.')
+parser.add_argument('--csv_file',               type=str,       default=None,           help='The path of color code csv file.')
+parser.add_argument('--one_hot_palette_label',  type=str,       required=True,          help="xml-file for one-hot-conversion of labels")
+parser.add_argument('--num_classes',            type=int,       required=True,          help='The number of classes to be segmented.')
+parser.add_argument('--crop_height',            type=int,       default=256,            help='The height to crop the image.')
+parser.add_argument('--crop_width',             type=int,       default=256,            help='The width to crop the image.')
+parser.add_argument('--weights',                type=str,       default=None,           help='The path of weights to be loaded.')
+parser.add_argument('--input_testing',          type=str,       required=True,          help='The path of predicted image.')
+parser.add_argument('--label_testing',          type=str,       required=True,          help='The path of predicted image.')
+parser.add_argument('--max_samples_testing',    type=int,       required=True,          help='The path of predicted image.')
+parser.add_argument('--color_encode',           type=str2bool,  default=True,           help='Whether to color encode the prediction.')
 
-args = parser.parse_args()
+conf, unknown = parser.parse_known_args()
 
 # check related paths
 paths = check_related_path(os.getcwd())
 
 # check the image path
-if not os.path.exists(args.image_path):
-    raise ValueError('The path \'{image_path}\' does not exist the image file.'.format(image_path=args.image_path))
+if not os.path.exists(conf.input_testing):
+    raise ValueError('The path \'{input_testing}\' does not exist the image file.'.format(input_testing=conf.input_testing))
 
 # build the model
-net, base_model = builder(args.num_classes, (args.crop_height, args.crop_width), args.model, args.base_model)
+model, base_model = model_builder(conf.num_classes, (conf.crop_height, conf.crop_width), conf.model, conf.base_model)
 
 # load weights
 print('Loading the weights...')
-if args.weights is None:
-    net.load_weights(filepath=os.path.join(
-        paths['weigths_path'], '{model}_based_on_{base_model}.h5'.format(model=args.model, base_model=base_model)))
+if conf.weights is None:
+    model.load_weights(filepath=os.path.join(
+        paths['weigths_path'], '{model}_based_on_{base_model}.h5'.format(model=conf.model, base_model=base_model)))
 else:
-    if not os.path.exists(args.weights):
-        raise ValueError('The weights file does not exist in \'{path}\''.format(path=args.weights))
-    net.load_weights(args.weights)
+    if not os.path.exists(conf.weights):
+        raise ValueError('The weights file does not exist in \'{path}\''.format(path=conf.weights))
+    model.load_weights(conf.weights)
 
 # begin testing
 print("\n***** Begin testing *****")
-print("Model -->", args.model)
+print("Model -->", conf.model)
 print("Base Model -->", base_model)
-print("Crop Height -->", args.crop_height)
-print("Crop Width -->", args.crop_width)
-print("Num Classes -->", args.num_classes)
+print("Crop Height -->", conf.crop_height)
+print("Crop Width -->", conf.crop_width)
+print("Num Classes -->", conf.num_classes)
 
 print("")
 
 # load_images
-image_names=list()
-if os.path.isfile(args.image_path):
-    image_names.append(args.image_path)
-else:
-    for f in os.listdir(args.image_path):
-        image_names.append(os.path.join(args.image_path, f))
-    image_names.sort()
+files_test_input = utils.get_files_recursive(conf.input_testing)
+files_test_label = utils.get_files_recursive(conf.label_testing, "color")
+_, idcs = utils.sample_list(files_test_label, n_samples=conf.max_samples_testing)
+files_test_input = np.take(files_test_input, idcs)
+files_test_label = np.take(files_test_label, idcs)
 
 # get color info
-if args.csv_file is None:
-    csv_file = os.path.join('CamVid', 'class_dict.csv')
-else:
-    csv_file = args.csv_file
+_, color_values = utils.parse_convert_py(conf.one_hot_palette_label)
 
-_, color_values = get_colored_info(csv_file)
-
-for i, name in enumerate(image_names):
-    sys.stdout.write('\rRunning test image %d / %d'%(i+1, len(image_names)))
+for i, name in enumerate(files_test_input.tolist()):
+    sys.stdout.write('\rRunning test image %d / %d'%(i+1, len(files_test_input)))
     sys.stdout.flush()
 
-    image = cv2.resize(load_image(name),
-                       dsize=(args.crop_width, args.crop_height))
-    image = imagenet_utils.preprocess_input(image.astype(np.float32), data_format='channels_last', mode='torch')
+    image = cv2.resize(utils.load_image(name),
+                       dsize=(conf.crop_width, conf.crop_height))
+    image = appl.imagenet_utils.preprocess_input(image.astype(np.float32), data_format='channels_last', mode='torch')
 
     # image processing
     if np.ndim(image) == 3:
@@ -101,16 +100,16 @@ for i, name in enumerate(image_names):
     assert np.ndim(image) == 4
 
     # get the prediction
-    prediction = net.predict(image)
+    prediction = model.predict(image)
 
     if np.ndim(prediction) == 4:
         prediction = np.squeeze(prediction, axis=0)
 
     # decode one-hot
-    prediction = decode_one_hot(prediction)
+    prediction = utils.decode_one_hot(prediction)
 
     # color encode
-    if args.color_encode:
+    if conf.color_encode:
         prediction = color_encode(prediction, color_values)
 
     # get PIL file
