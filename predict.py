@@ -38,16 +38,14 @@ parser.add_argument('--one_hot_palette_label',  type=str,       required=True,  
 parser.add_argument('--num_classes',            type=int,       required=True,          help='The number of classes to be segmented.')
 parser.add_argument('--crop_height',            type=int,       default=256,            help='The height to crop the image.')
 parser.add_argument('--crop_width',             type=int,       default=256,            help='The width to crop the image.')
-parser.add_argument('--weights',                type=str,       default=None,           help='The path of weights to be loaded.')
+parser.add_argument('--output_dir',             type=str,       required=True,          help='The output directory for TensorBoard and models')
+parser.add_argument('--weights',                type=str,       required=True,          help='The path of weights to be loaded.')
 parser.add_argument('--input_testing',          type=str,       required=True,          help='The path of predicted image.')
 parser.add_argument('--label_testing',          type=str,       required=True,          help='The path of predicted image.')
 parser.add_argument('--max_samples_testing',    type=int,       required=True,          help='The path of predicted image.')
 parser.add_argument('--color_encode',           type=str2bool,  default=True,           help='Whether to color encode the prediction.')
 
 conf, unknown = parser.parse_known_args()
-
-# check related paths
-paths = check_related_path(os.getcwd())
 
 # check the image path
 if not os.path.exists(conf.input_testing):
@@ -57,14 +55,24 @@ if not os.path.exists(conf.input_testing):
 model, base_model = model_builder(conf.num_classes, (conf.crop_height, conf.crop_width), conf.model, conf.base_model)
 
 # load weights
+# check related paths
 print('Loading the weights...')
-if conf.weights is None:
-    model.load_weights(filepath=os.path.join(
-        paths['weigths_path'], '{model}_based_on_{base_model}.h5'.format(model=conf.model, base_model=base_model)))
-else:
-    if not os.path.exists(conf.weights):
-        raise ValueError('The weights file does not exist in \'{path}\''.format(path=conf.weights))
+if os.path.isfile(conf.weights) and os.path.exists(conf.weights):
     model.load_weights(conf.weights)
+
+    if 'checkpoints' in os.path.dirname(conf.weights):
+        output_dir = os.path.dirname(os.path.dirname(conf.weights))
+    else:
+        output_dir = os.path.dirname(conf.weights)
+
+    prediction_path = os.path.join(output_dir, 'predictions')
+    if not os.path.exists(prediction_path):
+        os.mkdir(prediction_path)
+    paths = {'checkpoints_path': os.path.dirname(conf.weights),
+             'prediction_path': prediction_path}
+else:
+    raise ValueError('The weights file does not exist in \'{path}\''.format(path=conf.weights))
+
 
 # begin testing
 print("\n***** Begin testing *****")
@@ -73,6 +81,8 @@ print("Base Model -->", base_model)
 print("Crop Height -->", conf.crop_height)
 print("Crop Width -->", conf.crop_width)
 print("Num Classes -->", conf.num_classes)
+print("Weights Path -->", conf.weights)
+print("Prediction Path -->", paths['prediction_path'])
 
 print("")
 

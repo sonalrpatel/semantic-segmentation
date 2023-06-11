@@ -95,7 +95,8 @@ def check_related_path(output_dir):
     paths = {'checkpoints_path': checkpoints_path,
              'logs_path': logs_path,
              'weights_path': weights_path,
-             'prediction_path': prediction_path}
+             'prediction_path': prediction_path,
+             'config_path': os.path.join(output_dir, 'config.txt')}
     
     return paths
 

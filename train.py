@@ -116,7 +116,7 @@ files_valid_label = np.take(files_valid_label, idcs)
 print(f"Found {len(files_valid_label)} validation samples")
 
 # parse one-hot-conversion.xml
-conf.one_hot_palette_label = utils.parse_convert_py(conf.one_hot_palette_label)
+_, conf.one_hot_palette_label = utils.parse_convert_py(conf.one_hot_palette_label)
 assert conf.num_classes == len(conf.one_hot_palette_label)
 
 # data augmentation setting
@@ -158,7 +158,7 @@ print("Built data pipeline for validation")
 
 
 # build the model
-model, base_model = model_builder(conf.num_classes, (conf.crop_height, conf.crop_width), conf.model, conf.base_model)
+model, conf.base_model = model_builder(conf.num_classes, (conf.crop_height, conf.crop_width), conf.model, conf.base_model)
 
 # summary
 model.summary()
@@ -228,7 +228,7 @@ metrics = [tf.keras.metrics.CategoricalAccuracy(), MeanIoU(conf.num_classes)]
 
 # compile the model
 model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
-print("Compiled model *{}_based_on_{}*".format(conf.model, base_model))
+print("Compiled model *{}_based_on_{}*".format(conf.model, conf.base_model))
 
 
 # callbacks setting
@@ -239,7 +239,7 @@ validation_steps = len(files_valid_input) // conf.valid_batch_size              
 tensorboard_cb      = tf.keras.callbacks.TensorBoard(paths['logs_path'], update_freq="epoch", profile_batch=0)
 csvlogger_cb        = tf.keras.callbacks.CSVLogger(os.path.join(paths['checkpoints_path'], "log.csv"), append=True, separator=',')
 checkpoint_cb       = tf.keras.callbacks.ModelCheckpoint(os.path.join(paths['checkpoints_path'],
-                                                                      '{model}_based_on_{base}_'.format(model=conf.model, base=base_model) + 
+                                                                      '{model}_based_on_{base}_'.format(model=conf.model, base=conf.base_model) + 
                                                                     #   'miou_{val_mean_io_u:04f}_' + 
                                                                       'ep_{epoch:02d}.hdf5'),
                                                          save_freq=conf.checkpoint_freq*steps_per_epoch, save_weights_only=True)
@@ -256,7 +256,7 @@ print("GPU -->", tf.config.list_physical_devices('GPU'))
 print("Dataset -->", conf.dataset)
 print("Num Images -->", len(files_train_input))
 print("Model -->", conf.model)
-print("Base Model -->", base_model)
+print("Base Model -->", conf.base_model)
 print("Crop Height -->", conf.crop_height)
 print("Crop Width -->", conf.crop_width)
 print("Num Epochs -->", conf.epochs)
@@ -282,6 +282,12 @@ print("\tChannel Shift -->", conf.channel_shift)
 print("")
 
 
+# writing config into text file
+with open(paths['config_path'], 'w') as f:
+    for key, value in vars(conf).items():
+        f.write('%s:%s\n' % (key, value))
+
+
 # training
 model.fit(dataTrain,
           epochs=conf.epochs, initial_epoch=conf.initial_epoch, steps_per_epoch=steps_per_epoch,
@@ -290,4 +296,4 @@ model.fit(dataTrain,
           callbacks=callbacks)
 
 # save weights
-model.save(filepath=os.path.join(paths['weights_path'], '{model}_based_on_{base_model}.h5'.format(model=conf.model, base_model=base_model)))
+model.save(filepath=os.path.join(paths['weights_path'], '{model}_based_on_{base_model}.h5'.format(model=conf.model, base_model=conf.base_model)))
