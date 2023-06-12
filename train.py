@@ -90,6 +90,9 @@ def train(*args):
         # update model per input from main
         if args[0] == 'model':
             conf.model = args[1]
+        # update loss per input from main
+        if args[0] == 'loss':
+            conf.loss = args[1]
 
     # determine absolute filepaths
     conf.input_training   = utils.abspath(conf.input_training)
