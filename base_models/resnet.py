@@ -11,6 +11,7 @@ import tensorflow as tf
 
 layers = tf.keras.layers
 backend = tf.keras.backend
+appl = tf.keras.applications
 
 
 class ResNet(object):
@@ -194,6 +195,46 @@ class ResNet(object):
         for i in range(self.params[3]):
             x = self._identity_block(x, 3, [512, 512, 2048], stage=5, block=chr(ord('b') + i), dilation=dilation[1])
         c5 = x
+
+        self.outputs = {'c1': c1,
+                        'c2': c2,
+                        'c3': c3,
+                        'c4': c4,
+                        'c5': c5}
+
+        if type(output_stages) is not list:
+            return self.outputs[output_stages]
+        else:
+            return [self.outputs[ci] for ci in output_stages]
+
+
+class ResNet_KA(object):
+    def __init__(self, version='ResNet50', bm_weights=None, **kwargs):
+        """
+       The implementation of ResNet based on Keras.Application.
+       :param version: 'ResNet50'
+       :param kwargs: other parameters.
+       """
+        super(ResNet_KA, self).__init__(**kwargs)
+        self.version = version
+        self.bm_weights = bm_weights
+
+    def __call__(self, inputs, output_stages='c5', **kwargs):
+        """
+        call for ResNet50.
+        :param inputs: a 4-D tensor.
+        :param output_stages: str or a list of str containing the output stages.
+        :param kwargs: other parameters.
+        :return: the output of different stages.
+        """
+        resnet50 = appl.ResNet50(input_tensor=inputs, weights=self.bm_weights, include_top=False)
+
+        c0 = resnet50.get_layer("input_1").output               # c0-inputs : - x - x 3
+        c1 = resnet50.get_layer("conv1_relu").output            # c1-skip   : - x - x 64
+        c2 = resnet50.get_layer("conv2_block3_out").output      # c2-skip   : - x - x 256
+        c3 = resnet50.get_layer("conv3_block4_out").output      # c3-skip   : - x - x 512
+        c4 = resnet50.get_layer("conv4_block6_out").output      # c4-skip   : - x - x 1024
+        c5 = resnet50.get_layer("conv5_block3_out").output      # c5-bridge : - x - x 2048
 
         self.outputs = {'c1': c1,
                         'c2': c2,

@@ -10,10 +10,12 @@ from base_models import *
 
 
 class Network(object):
-    def __init__(self, num_classes, version='PAN', base_model='ResNet50', dilation=None, **kwargs):
+    def __init__(self, num_classes, version='PAN', base_model='ResNet50', dilation=None, bm_weights=None, **kwargs):
         super(Network, self).__init__(**kwargs)
         if base_model in ['VGG16', 'VGG19']:
             self.encoder = VGG(base_model, dilation=dilation)
+        elif base_model in ['ResNet50_KA']:
+            self.encoder = ResNet_KA(base_model, bm_weights=bm_weights)
         elif base_model in ['ResNet50', 'ResNet101', 'ResNet152']:
             self.encoder = ResNet(base_model, dilation=dilation)
         elif base_model in ['DenseNet121', 'DenseNet169', 'DenseNet201', 'DenseNet264']:
@@ -23,8 +25,7 @@ class Network(object):
         elif base_model in ['MobileNetV1', 'MobileNetV2']:
             self.encoder = MobileNet(base_model, dilation=dilation)
         else:
-            raise ValueError('The base model {model} is not in the '
-                             'supported model list!!!'.format(model=base_model))
+            raise ValueError('The base model {model} is not in the supported model list!!!'.format(model=base_model))
 
         self.num_classes = num_classes
         self.version = version

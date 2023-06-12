@@ -23,12 +23,13 @@ models = {'FCN-8s': FCN,
           'BiSegNet': BiSegNet}
 
 
-def model_builder(num_classes, input_size=(256, 256), model='SegNet', base_model=None):
+def model_builder(num_classes, input_size=(256, 256), model='SegNet', base_model=None, bm_weights=None):
     assert model in models
     assert isinstance(input_size, tuple)
 
     # initialise the selected model class
-    model = models[model](num_classes, input_size, model, base_model)
+    # passing bm_weights as part of **kwargs as it is not used for all models
+    model = models[model](num_classes, input_size, model, base_model, **{'bm_weights': bm_weights})
     
     # get the base_model name
     base_model = model.get_base_model()

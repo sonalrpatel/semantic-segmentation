@@ -47,6 +47,8 @@ parser.add("-nc",   "--num_classes",                type=int,       default=32, 
 parser.add("-ohl",  "--one_hot_palette_label",      type=str,       required=True,              help="xml-file for one-hot-conversion of labels")
 parser.add("-m",    "--model",                      type=str,       required=True,              help="choose the semantic segmentation methods")
 parser.add("-bm",   "--base_model",                 type=str,       default=None,               help="choose the backbone model")
+parser.add("-mw",   "--model_weights",              type=str,       default=None,               help="weights file of trained model for training continuation")
+parser.add("-bmw",  "--bm_weights",                 type=str,       default=None,               help="weights file of base model from pre training")
 parser.add("-bt",   "--batch_size",                 type=int,       default=4,                  help="training batch size")
 parser.add("-bv",   "--valid_batch_size",           type=int,       default=4,                  help="validation batch size")
 parser.add("-ep",   "--epochs",                     type=int,       default=40,                 help="number of epochs for training")
@@ -55,7 +57,6 @@ parser.add("-fc",   "--checkpoint_freq",            type=int,       default=5,  
 parser.add("-fv",   "--validation_freq",            type=int,       default=1,                  help="how often to perform validation")
 parser.add("-s",    "--data_shuffle",               type=str2bool,  default=True,               help="whether to shuffle the data")
 parser.add("-rs",   "--random_seed",                type=int,       default=None,               help="random shuffle seed")
-parser.add("-mw",   "--model_weights",              type=str,       default=None,               help="weights file of trained model for training continuation")
 parser.add("-spe",  "--steps_per_epoch",            type=int,       default=None,               help="training steps of each epoch")
 parser.add("-esp",  "--early_stopping_patience",    type=int,       default=10,                 help="patience for early-stopping due to converged validation mIoU")
 parser.add("-lr",   "--learning_rate",              type=float,     default=3e-4,               help="the initial learning rate")
@@ -166,7 +167,8 @@ def train(*args):
 
 
     # build the model
-    model, conf.base_model = model_builder(conf.num_classes, (conf.image_shape[0], conf.image_shape[1]), conf.model, conf.base_model)
+    model, conf.base_model = model_builder(conf.num_classes, (conf.image_shape[0], conf.image_shape[1]), conf.model, conf.base_model,
+                                           conf.bm_weights)
 
     # summary
     model.summary()

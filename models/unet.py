@@ -28,6 +28,7 @@ class UNet(Network):
         assert version == 'UNet'
         assert base_model in ['VGG16',
                               'VGG19',
+                              'ResNet50_KA',
                               'MobileNetV1',
                               'MobileNetV2']
         
