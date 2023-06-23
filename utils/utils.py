@@ -285,8 +285,8 @@ def parse_convert_py(conversion_file_path):
     module = importlib.import_module(module_name, package=module_path)
 
     labels = module.labels
-    one_hot_palette_label_values = [list(labels[k].color) for k in range(len(labels)) if labels[k].trainId > 0 and labels[k].trainId < 255]
-    one_hot_palette_label_names = [labels[k].name for k in range(len(labels)) if labels[k].trainId > 0 and labels[k].trainId < 255]
+    one_hot_palette_label_values = [list(labels[k].color) for k in range(len(labels)) if labels[k].trainId >= 0 and labels[k].trainId < 255]
+    one_hot_palette_label_names = [labels[k].name for k in range(len(labels)) if labels[k].trainId >= 0 and labels[k].trainId < 255]
 
     return one_hot_palette_label_names, one_hot_palette_label_values
 

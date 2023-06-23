@@ -16,6 +16,7 @@ import configargparse
 import sys
 import cv2
 import os
+from utils.models.SegmentationModels import Unet, Residual_Unet, Attention_Unet, Unet_plus, DeepLabV3plus
 
 appl = tf.keras.applications
 
@@ -51,7 +52,32 @@ if not os.path.exists(conf.input_testing):
     raise ValueError('The path \'{input_testing}\' does not exist the image file.'.format(input_testing=conf.input_testing))
 
 # build the model
-model, base_model = model_builder(conf.num_classes, (conf.image_shape[0], conf.image_shape[1]), conf.model, conf.base_model)
+# model, conf.base_model = model_builder(conf.num_classes, (conf.image_shape[0], conf.image_shape[1]), conf.model, conf.base_model)
+
+
+# Instantiate Model
+MODEL_TYPE = 'DeepLabV3plus' # Unet
+BACKBONE = 'EfficientNetV2M'
+UNFREEZE_AT = 'block6a_expand_activation' # block4a_expand_activation
+INPUT_SHAPE = [256, 256, 3] # do not change
+OUTPUT_STRIDE = 32
+FILTERS = [16, 32, 64, 128, 256]
+ACTIVATION = 'leaky_relu' # swish, leaky_relu
+DROPOUT_RATE = 0
+PRETRAINED_WEIGHTS = None
+NUM_CLASSES = 20
+
+model_function = eval(MODEL_TYPE)
+model = model_function(input_shape=INPUT_SHAPE,
+                        filters=FILTERS,
+                        num_classes=NUM_CLASSES,
+                        output_stride=OUTPUT_STRIDE,
+                        activation=ACTIVATION,
+                        dropout_rate=DROPOUT_RATE,
+                        backbone_name=BACKBONE,
+                        freeze_backbone=False,
+                        unfreeze_at=UNFREEZE_AT,
+                        )
 
 # load weights
 # check related paths
@@ -76,7 +102,7 @@ else:
 # begin testing
 print("\n***** Begin testing *****")
 print("Model -->", conf.model)
-print("Base Model -->", base_model)
+print("Base Model -->", conf.base_model)
 print("Image Shape -->", [conf.image_shape[0], conf.image_shape[1]])
 print("Num Classes -->", conf.num_classes)
 print("Weights Path -->", conf.weights)

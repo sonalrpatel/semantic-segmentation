@@ -6,20 +6,36 @@ The file defines the training process.
 @Project: https://github.com/luyanger1799/amazing-semantic-segmentation
 
 """
-# from utils.data_generator import ImageDataGenerator
 from utils.helpers import check_related_path
 from utils.callbacks import LearningRateScheduler
 from utils.optimizers import *
 from utils.learning_rate import *
 from utils.metrics import MeanIoU
-from utils.losses import *
-from utils.lossfunc import *
+from utils.loss_func import *
 from utils.loss_functions import *
+from utils.losses import *
+from utils.losses_segmentation import IoULoss, DiceLoss, TverskyLoss, FocalTverskyLoss, HybridLoss, FocalHybridLoss
 from utils import utils
 from builders import model_builder
+from models.models_segmentation import Unet, Residual_Unet, Attention_Unet, Unet_plus, DeepLabV3plus
+
 import tensorflow as tf
+from keras import models
+from keras.optimizers import Adam, SGD, Adadelta, Nadam
+from tensorflow_addons.optimizers import AdamW, SGDW, AdaBelief
+from keras.callbacks import TensorBoard, CSVLogger, ModelCheckpoint, EarlyStopping
+
 import configargparse
 import os
+
+from utils.augmentations import Augment
+from albumentations import (
+    Compose, HorizontalFlip, CLAHE, HueSaturationValue, GridDropout, ColorJitter,
+    RandomBrightnessContrast, RandomGamma, OneOf, Rotate, RandomSunFlare, Cutout,
+    ToFloat, ShiftScaleRotate, GridDistortion, ElasticTransform, HueSaturationValue,
+    RGBShift, Blur, MotionBlur, MedianBlur, GaussNoise, CenterCrop,
+    IAAAdditiveGaussianNoise, GaussNoise, OpticalDistortion, RandomSizedCrop
+)
 
 
 def str2bool(v):
@@ -46,27 +62,24 @@ parser.add("-is",   "--image_shape",                type=int,       required=Tru
 parser.add("-nc",   "--num_classes",                type=int,       default=32,                 help="The number of classes to be segmented")
 parser.add("-ohl",  "--one_hot_palette_label",      type=str,       required=True,              help="xml-file for one-hot-conversion of labels")
 parser.add("-m",    "--model",                      type=str,       required=True,              help="choose the semantic segmentation methods")
-parser.add("-bm",   "--base_model",                 type=str,       default=None,               help="choose the backbone model")
+parser.add("-bm",   "--base_model",                 type=str,       default=None,               help="choose the base model")
 parser.add("-mw",   "--model_weights",              type=str,       default=None,               help="weights file of trained model for training continuation")
 parser.add("-bmw",  "--bm_weights",                 type=str,       default=None,               help="weights file of base model from pre training")
 parser.add("-bt",   "--batch_size",                 type=int,       default=4,                  help="training batch size")
 parser.add("-bv",   "--valid_batch_size",           type=int,       default=4,                  help="validation batch size")
-parser.add("-ep",   "--epochs",                     type=int,       default=40,                 help="number of epochs for training")
-parser.add("-ie",   "--initial_epoch",              type=int,       default=0,                  help="initial epoch of training")
+parser.add("-ie",   "--epochs",                     type=int,       default=10,                 help="number of epochs of training with freezed backbone")
+parser.add("-ep",   "--final_epoch",                type=int,       default=20,                 help="final epoch for training with unfreezed backbone")
 parser.add("-fc",   "--checkpoint_freq",            type=int,       default=5,                  help="epoch interval to save a model checkpoint")
 parser.add("-fv",   "--validation_freq",            type=int,       default=1,                  help="how often to perform validation")
 parser.add("-s",    "--data_shuffle",               type=str2bool,  default=True,               help="whether to shuffle the data")
 parser.add("-rs",   "--random_seed",                type=int,       default=None,               help="random shuffle seed")
-parser.add("-spe",  "--steps_per_epoch",            type=int,       default=None,               help="training steps of each epoch")
 parser.add("-esp",  "--early_stopping_patience",    type=int,       default=10,                 help="patience for early-stopping due to converged validation mIoU")
 parser.add("-lr",   "--learning_rate",              type=float,     default=3e-4,               help="the initial learning rate")
 parser.add("-lrw",  "--lr_warmup",                  type=bool,      default=False,              help="whether to use lr warm up")
 parser.add("-lrs",  "--lr_scheduler",               type=str,       default="cosine_decay",     help="strategy to schedule learning rate",
                     choices=["step_decay", "poly_decay", "cosine_decay"])
-parser.add("-ls",   "--loss",                       type=str,       default=None,               help="loss function for training",
-                    choices=["ce", "focal_loss", "miou_loss", "self_balanced_focal_loss"])
-parser.add("-op",   "--optimizer",                  type=str,       default="adam",             help="The optimizer for training",
-                    choices=["sgd", "adam", "nadam", "adamw", "nadamw", "sgdw"])
+parser.add("-ls",   "--loss",                       type=str,       default=None,               help="loss function for training")
+parser.add("-op",   "--optimizer",                  type=str,       default="adam",             help="The optimizer for training")
 parser.add("-od",   "--output_dir",                 type=str,       required=True,              help="output directory for TensorBoard and models")
 
 parser.add("-ar",   "--data_aug_rate",              type=float,     default=0.0,                help="the rate of data augmentation")
@@ -87,10 +100,10 @@ def train(*args):
     if len(args) != 0:
         assert len(args) == 2
         
-        # update model per input from main
+        # update model per input from main for running train() in loop of models
         if args[0] == 'model':
             conf.model = args[1]
-        # update loss per input from main
+        # update loss per input from main for running train() in loop of losses
         if args[0] == 'loss':
             conf.loss = args[1]
 
@@ -130,35 +143,36 @@ def train(*args):
     _, conf.one_hot_palette_label = utils.parse_convert_py(conf.one_hot_palette_label)
     assert conf.num_classes == len(conf.one_hot_palette_label)
 
-
     # data augmentation setting
+    # TODO
 
     # data generator
     # build dataset pipeline parsing functions
     def parse_sample(input_files, label_file):
-        # parse and process input images
-        input = utils.load_image_op(input_files)
-        input = utils.resize_image_op(input, image_shape_original_input, conf.image_shape, interpolation=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+        # parse and process image
+        image = utils.load_image_op(input_files)
+        image = utils.resize_image_op(image, image_shape_original_input, conf.image_shape, interpolation=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
         # normalise the image
-        input = utils.normalise_image_op(input)
+        image = utils.normalise_image_op(image)
         
-        # parse and process label image
+        # parse and process label
         label = utils.load_image_op(label_file)
         label = utils.resize_image_op(label, image_shape_original_label, conf.image_shape, interpolation=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
         # one hot encode the label
         # label = utils.one_hot_encode_gray_op(label, conf.num_classes)
         label = utils.one_hot_encode_label_op(label, conf.one_hot_palette_label)
-        return input, label
-
+        return image, label
 
     # build training data pipeline
     dataTrain = tf.data.Dataset.from_tensor_slices((files_train_input, files_train_label))
     dataTrain = dataTrain.shuffle(buffer_size=conf.max_samples_training, reshuffle_each_iteration=True)
     dataTrain = dataTrain.map(parse_sample, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    dataTrain = dataTrain.map(Augment(93))
     dataTrain = dataTrain.batch(conf.batch_size, drop_remainder=True)
     dataTrain = dataTrain.repeat(conf.epochs)
     dataTrain = dataTrain.prefetch(1)
-    print("Built data pipeline for training")
+    n_batches_train = dataTrain.cardinality().numpy() // conf.epochs
+    print("Built data pipeline for training with {} batches".format(n_batches_train))
 
     # build validation data pipeline
     dataValid = tf.data.Dataset.from_tensor_slices((files_valid_input, files_valid_label))
@@ -166,12 +180,37 @@ def train(*args):
     dataValid = dataValid.batch(conf.valid_batch_size, drop_remainder=True)
     dataValid = dataValid.repeat(conf.epochs)
     dataValid = dataValid.prefetch(1)
-    print("Built data pipeline for validation")
+    n_batches_valid = dataValid.cardinality().numpy() // conf.epochs
+    print("Built data pipeline for validation with {} batches".format(n_batches_valid))
 
 
     # build the model
     model, conf.base_model = model_builder(conf.num_classes, (conf.image_shape[0], conf.image_shape[1]), conf.model, conf.base_model,
-                                           conf.bm_weights)
+                                            conf.bm_weights)
+
+    # instantiate Model
+    # MODEL_TYPE = 'DeepLabV3plus' # Unet
+    # BACKBONE = 'EfficientNetV2M'
+    # UNFREEZE_AT = 'block6a_expand_activation' # block4a_expand_activation
+    # INPUT_SHAPE = [256, 256, 3] # do not change
+    # OUTPUT_STRIDE = 32
+    # FILTERS = [16, 32, 64, 128, 256]
+    # ACTIVATION = 'leaky_relu' # swish, leaky_relu
+    # DROPOUT_RATE = 0
+    # PRETRAINED_WEIGHTS = None
+    # NUM_CLASSES = conf.num_classes
+
+    # model_function = eval(MODEL_TYPE)
+    # model = model_function(input_shape=INPUT_SHAPE,
+    #                         filters=FILTERS,
+    #                         num_classes=NUM_CLASSES,
+    #                         output_stride=OUTPUT_STRIDE,
+    #                         activation=ACTIVATION,
+    #                         dropout_rate=DROPOUT_RATE,
+    #                         backbone_name=BACKBONE,
+    #                         freeze_backbone=True,
+    #                         weights=PRETRAINED_WEIGHTS
+    #                         )
 
     # summary
     model.summary()
@@ -181,57 +220,71 @@ def train(*args):
         print('Loading the weights...')
         model.load_weights(conf.model_weights)
 
-
     # choose loss
-    losses = {'ce': categorical_crossentropy_with_logits,
-            'focal_loss': focal_loss(),
-            'miou_loss': miou_loss(num_classes=conf.num_classes),
-            'self_balanced_focal_loss': self_balanced_focal_loss(),
+    losses = {
+        #losses.py
+        'ce': categorical_crossentropy_with_logits,
+        'focal_loss_': focal_loss(),
+        'miou_loss': miou_loss(num_classes=conf.num_classes),
+        'self_balanced_focal_loss': self_balanced_focal_loss(),
+        
+        #losses_segmentation.py
+        'FocalHybridLoss': eval('FocalHybridLoss')(),
 
-            'iou_loss': LossFunc(conf.num_classes).iou_loss,
-            'dice_loss': LossFunc(conf.num_classes).dice_loss,
-            'ce_iou_loss': LossFunc(conf.num_classes).CEIoU_loss,
-            'ce_dice_loss': LossFunc(conf.num_classes).CEDice_loss,
-            
-            'wce_loss': Semantic_loss_functions().weighted_cross_entropyloss,
-            'focal_loss_2': Semantic_loss_functions().focal_loss,
-            'dice_loss_2': Semantic_loss_functions().dice_loss,
-            'bce_dice_loss': Semantic_loss_functions().bce_dice_loss,
-            'tversky_loss': Semantic_loss_functions().tversky_loss,
-            'log_cosh_dice_loss': Semantic_loss_functions().log_cosh_dice_loss,
-            'jacard_loss': Semantic_loss_functions().jacard_loss,
-            'ssim_loss': Semantic_loss_functions().ssim_loss,
-            'unet3p_hybrid_loss': Semantic_loss_functions().unet3p_hybrid_loss,
-            'basnet_hybrid_loss': Semantic_loss_functions().basnet_hybrid_loss}
+        #loss_functions.py
+        'wce_loss': Semantic_loss_functions().weighted_cross_entropyloss,
+        'focal_loss': Semantic_loss_functions().focal_loss,
+        'dice_loss': Semantic_loss_functions().dice_loss,
+        'bce_dice_loss': Semantic_loss_functions().bce_dice_loss,
+        'tversky_loss': Semantic_loss_functions().tversky_loss,
+        'log_cosh_dice_loss': Semantic_loss_functions().log_cosh_dice_loss,
+        'jacard_loss': Semantic_loss_functions().jacard_loss,
+        'ssim_loss': Semantic_loss_functions().ssim_loss,
+        'unet3p_hybrid_loss': Semantic_loss_functions().unet3p_hybrid_loss,
+        'basnet_hybrid_loss': Semantic_loss_functions().basnet_hybrid_loss,
+        
+        #loss_func.py
+        'iou_loss': LossFunc(conf.num_classes).iou_loss,
+        'dice_loss_': LossFunc(conf.num_classes).dice_loss,
+        'ce_iou_loss': LossFunc(conf.num_classes).CEIoU_loss,
+        'ce_dice_loss': LossFunc(conf.num_classes).CEDice_loss,
+    }
 
     loss = losses[conf.loss] if conf.loss is not None else categorical_crossentropy_with_logits
 
     # chose optimizer
-    total_iterations = len(files_train_input) * conf.epochs // conf.batch_size
-    wd_dict = utils.get_weight_decays(model)
-    ordered_values = []
-    weight_decays = utils.fill_dict_in_order(wd_dict, ordered_values)
+    OPTIMIZER_NAME = conf.optimizer
+    WEIGHT_DECAY = 0.00005
+    MOMENTUM = 0.9
+    START_LR = 0.001
+    END_LR = 0.0001
+    LR_DECAY_EPOCHS = 10
+    POWER = 2
 
-    optimizers = {'adam': tf.keras.optimizers.Adam(learning_rate=conf.learning_rate),
-                'nadam': tf.keras.optimizers.Nadam(learning_rate=conf.learning_rate),
-                'sgd': tf.keras.optimizers.SGD(learning_rate=conf.learning_rate, momentum=0.99),
-                #   'adamw': AdamW(learning_rate=conf.learning_rate, batch_size=conf.batch_size,
-                #                  total_iterations=total_iterations),
-                #   'nadamw': NadamW(learning_rate=conf.learning_rate, batch_size=conf.batch_size,
-                #                    total_iterations=total_iterations),
-                #   'sgdw': SGDW(learning_rate=conf.learning_rate, momentum=0.99, batch_size=conf.batch_size,
-                #                total_iterations=total_iterations)
-                }
+    lr_schedule = tf.keras.optimizers.schedules.PolynomialDecay(
+        initial_learning_rate=START_LR,
+        decay_steps=LR_DECAY_EPOCHS*n_batches_train,
+        end_learning_rate=END_LR,
+        power=POWER,
+        cycle=False,
+        name=None
+    )
+
+    optimizers = {
+        'adam'      : Adam(learning_rate=conf.learning_rate),
+        'nadam'     : Nadam(learning_rate=conf.learning_rate),
+        'sgd'       : SGD(learning_rate=conf.learning_rate, momentum=0.99),
+        'adamw'     : AdamW(learning_rate=conf.learning_rate, weight_decay=0.00005),
+        'sgdw'      : SGDW(learning_rate=conf.learning_rate, momentum=0.99, weight_decay=0.00005),
+
+        'Adam'      : Adam(lr_schedule),
+        'Adadelta'  : Adadelta(lr_schedule),
+        'AdamW'     : AdamW(learning_rate=lr_schedule, weight_decay=WEIGHT_DECAY),
+        'AdaBelief' : AdaBelief(learning_rate=lr_schedule),
+        'SGDW'      : SGDW(learning_rate=lr_schedule, weight_decay=WEIGHT_DECAY, momentum=MOMENTUM)
+    }
+
     optimizer = optimizers[conf.optimizer]
-
-    # lr schedule strategy
-    if conf.lr_warmup and conf.epochs - 5 <= 0:
-        raise ValueError('epochs must be larger than 5 if lr warm up is used.')
-
-    lr_decays = {'step_decay': step_decay(conf.learning_rate, conf.epochs, warmup=conf.lr_warmup),
-                'poly_decay': poly_decay(conf.learning_rate, conf.epochs, warmup=conf.lr_warmup),
-                'cosine_decay': cosine_decay(conf.learning_rate, conf.epochs, warmup=conf.lr_warmup)}
-    lr_decay = lr_decays[conf.lr_scheduler]
 
     # metrics
     metrics = [tf.keras.metrics.CategoricalAccuracy(), MeanIoU(conf.num_classes)]
@@ -240,24 +293,40 @@ def train(*args):
     model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
     print("Compiled model *{}_based_on_{}*".format(conf.model, conf.base_model))
 
-
     # callbacks setting
     # training and validation steps
-    steps_per_epoch = len(files_train_input) // conf.batch_size if not conf.steps_per_epoch else conf.steps_per_epoch   # n_batches_train
-    validation_steps = len(files_valid_input) // conf.valid_batch_size                                                  # n_batches_valid
+    steps_per_epoch     = n_batches_train
+    validation_steps    = n_batches_valid
     # create callbacks to be called after each epoch
-    tensorboard_cb      = tf.keras.callbacks.TensorBoard(paths['logs_path'], update_freq="epoch", profile_batch=0)
-    csvlogger_cb        = tf.keras.callbacks.CSVLogger(os.path.join(paths['checkpoints_path'], "log.csv"), append=True, separator=',')
-    checkpoint_cb       = tf.keras.callbacks.ModelCheckpoint(os.path.join(paths['checkpoints_path'],
-                                                                        '{model}_based_on_{base}_'.format(model=conf.model, base=conf.base_model) + 
-                                                                        #   'miou_{val_mean_io_u:04f}_' + 
-                                                                        'ep_{epoch:02d}.hdf5'),
-                                                            save_freq=conf.checkpoint_freq*steps_per_epoch, save_weights_only=True)
-    best_checkpoint_cb  = tf.keras.callbacks.ModelCheckpoint(os.path.join(paths['checkpoints_path'], 'best_weights.hdf5'),
-                                                            save_best_only=True, monitor="val_mean_io_u", mode="max", save_weights_only=True)
-    early_stopping_cb   = tf.keras.callbacks.EarlyStopping(monitor="val_mean_io_u", mode="max", patience=conf.early_stopping_patience, verbose=1)
+    class CustomCallback(keras.callbacks.Callback):
+        def on_epoch_end(self, epoch, logs=None):
+            print("LR - {}".format(self.model.optimizer.learning_rate))
+        
+    tensorboard_cb      = TensorBoard(paths['logs_path'], update_freq="epoch", profile_batch=0)
+    csvlogger_cb        = CSVLogger(os.path.join(paths['checkpoints_path'], "log.csv"), append=True, separator=',')
+    checkpoint_cb       = ModelCheckpoint(os.path.join(paths['checkpoints_path'],
+                                                        '{model}_based_on_{base}_'.format(model=conf.model, base=conf.base_model) + 
+                                                        # 'miou_{val_mean_io_u:04f}_' + 
+                                                        'ep_{epoch:02d}.h5'),
+                                                        save_freq=conf.checkpoint_freq*steps_per_epoch, save_weights_only=True)
+    best_checkpoint_cb  = ModelCheckpoint(os.path.join(paths['weights_path'], "weights1.hdf5"),
+                                            save_best_only=True, monitor="val_mean_io_u", mode="max", save_weights_only=False)
+    early_stopping_cb   = EarlyStopping(monitor="val_mean_io_u", mode="max", patience=conf.early_stopping_patience, verbose=1)
+    lr_cb               = CustomCallback()
+
+    # lr schedule strategy
+    if conf.lr_warmup and conf.epochs - 5 <= 0:
+        raise ValueError('epochs must be larger than 5 if lr warm up is used.')
+
+    lr_decays = {'step_decay': step_decay(conf.learning_rate, conf.epochs, warmup=conf.lr_warmup),
+                 'poly_decay': poly_decay(conf.learning_rate, conf.epochs, warmup=conf.lr_warmup),
+                 'cosine_decay': cosine_decay(conf.learning_rate, conf.epochs, warmup=conf.lr_warmup)}
+    lr_decay = lr_decays[conf.lr_scheduler]
     lr_scheduler_cb     = LearningRateScheduler(lr_decay, conf.learning_rate, conf.lr_warmup, steps_per_epoch, verbose=1)
-    callbacks           = [tensorboard_cb, csvlogger_cb, checkpoint_cb, best_checkpoint_cb, early_stopping_cb, lr_scheduler_cb]
+
+    # callbacks
+    # callbacks = [tensorboard_cb, csvlogger_cb, checkpoint_cb, best_checkpoint_cb, lr_scheduler_cb, early_stopping_cb, lr_cb]
+    callbacks = [tensorboard_cb, csvlogger_cb, checkpoint_cb, best_checkpoint_cb, early_stopping_cb, lr_cb]
 
 
     # begin training
@@ -266,10 +335,10 @@ def train(*args):
     print("Dataset -->", conf.dataset)
     print("Num Images -->", len(files_train_input))
     print("Model -->", conf.model)
-    print("Base Model -->", conf.base_model)
+    print("Base_model -->", conf.base_model)
     print("Image Shape -->", [conf.image_shape[0], conf.image_shape[1]])
-    print("Num Epochs -->", conf.epochs)
-    print("Initial Epoch -->", conf.initial_epoch)
+    print("Epochs -->", conf.epochs)
+    print("Final_epoch -->", conf.final_epoch)
     print("Batch Size -->", conf.batch_size)
     print("Num Classes -->", conf.num_classes)
 
@@ -279,34 +348,99 @@ def train(*args):
     print("\tOptimizer -->", conf.optimizer)
     print("\tLr Scheduler -->", conf.lr_scheduler)
 
-    print("")
-    print("Data Augmentation:")
-    print("\tData Augmentation Rate -->", conf.data_aug_rate)
-    print("\tVertical Flip -->", conf.v_flip)
-    print("\tHorizontal Flip -->", conf.h_flip)
-    print("\tBrightness Alteration -->", conf.brightness)
-    print("\tRotation -->", conf.rotation)
-    print("\tZoom -->", conf.zoom_range)
-    print("\tChannel Shift -->", conf.channel_shift)
+    # print("")
+    # print("Data Augmentation:")
+    # print("\tData Augmentation Rate -->", conf.data_aug_rate)
+    # print("\tVertical Flip -->", conf.v_flip)
+    # print("\tHorizontal Flip -->", conf.h_flip)
+    # print("\tBrightness Alteration -->", conf.brightness)
+    # print("\tRotation -->", conf.rotation)
+    # print("\tZoom -->", conf.zoom_range)
+    # print("\tChannel Shift -->", conf.channel_shift)
 
     print("")
-
 
     # writing config into text file
     with open(paths['config_path'], 'w') as f:
         for key, value in vars(conf).items():
             f.write('%s:%s\n' % (key, value))
 
-
     # training
-    model.fit(dataTrain,
-            epochs=conf.epochs, initial_epoch=conf.initial_epoch, steps_per_epoch=steps_per_epoch,
-            validation_data=dataValid, validation_steps=validation_steps, validation_freq=conf.validation_freq,
-            # max_queue_size=10, workers=os.cpu_count(), use_multiprocessing=False,
-            callbacks=callbacks)
+    history = model.fit(dataTrain,
+                        epochs=conf.epochs, initial_epoch=0, steps_per_epoch=steps_per_epoch,
+                        validation_data=dataValid, validation_steps=validation_steps, validation_freq=conf.validation_freq,
+                        # max_queue_size=10, workers=os.cpu_count(), use_multiprocessing=False,
+                        callbacks=callbacks)
+    
+    # -------------------------- #
+    if False:
+        # after unfreezing the final backbone weights the batch size might need to be reduced to prevent OOM
+        # re-define the dataset streams with new batch size
+        # build training data pipeline
+        dataTrain = tf.data.Dataset.from_tensor_slices((files_train_input, files_train_label))
+        dataTrain = dataTrain.shuffle(buffer_size=conf.max_samples_training, reshuffle_each_iteration=True)
+        dataTrain = dataTrain.map(parse_sample, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        # dataTrain = dataTrain.map(Augment(93))
+        dataTrain = dataTrain.batch(conf.batch_size-2, drop_remainder=True)
+        dataTrain = dataTrain.repeat(conf.final_epoch-conf.epochs)
+        dataTrain = dataTrain.prefetch(1)
+        n_batches_train = dataTrain.cardinality().numpy() // (conf.final_epoch-conf.epochs)
+        print("Built data pipeline for training with {} batches".format(n_batches_train))
+
+        # build validation data pipeline
+        dataValid = tf.data.Dataset.from_tensor_slices((files_valid_input, files_valid_label))
+        dataValid = dataValid.map(parse_sample, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        dataValid = dataValid.batch(conf.valid_batch_size-2, drop_remainder=True)
+        dataValid = dataValid.repeat(conf.final_epoch-conf.epochs)
+        dataValid = dataValid.prefetch(1)
+        n_batches_valid = dataValid.cardinality().numpy() // (conf.final_epoch-conf.epochs)
+        print("Built data pipeline for validation with {} batches".format(n_batches_valid))
+
+        # instantiate Model
+        model = model_function(input_shape=INPUT_SHAPE,
+                            filters=FILTERS,
+                            num_classes=NUM_CLASSES,
+                            output_stride=OUTPUT_STRIDE,
+                            activation=ACTIVATION,
+                            dropout_rate=DROPOUT_RATE,
+                            backbone_name=BACKBONE,
+                            freeze_backbone=False,
+                            unfreeze_at=UNFREEZE_AT,
+                            )
+
+        # load the saved weights into the model to fine tune the high level features of the feature extractor
+        # fine tune the encoder network with a lower learning rate
+        model.load_weights(os.path.join(paths['weights_path'], "weights1.hdf5"))
+        model = models.load_model(os.path.join(paths['weights_path'], "weights1.hdf5"), compile=False)
+        
+        model.summary()
+
+        # optimizer with lower learning rate
+        optimizer_dict = {
+            'Adam'      : Adam(END_LR),
+            'Adadelta'  : Adadelta(END_LR),
+            'AdamW'     : AdamW(learning_rate=END_LR, weight_decay=WEIGHT_DECAY),
+            'AdaBelief' : AdaBelief(learning_rate=END_LR, weight_decay=WEIGHT_DECAY),
+            'SGDW'      : SGDW(learning_rate=END_LR, weight_decay=WEIGHT_DECAY, momentum=MOMENTUM)
+        }
+
+        optimizer = optimizer_dict[OPTIMIZER_NAME]
+
+        # re-compile the model
+        model.compile(loss=loss, optimizer=optimizer, metrics=metrics)
+
+        # begin training
+        print("\n***** Begin training with unfreezed backbone *****")
+
+        # training
+        history = model.fit(dataTrain,
+                            epochs=conf.final_epoch, initial_epoch=conf.epochs, steps_per_epoch=n_batches_train,
+                            validation_data=dataValid, validation_steps=n_batches_valid, validation_freq=conf.validation_freq,
+                            # max_queue_size=10, workers=os.cpu_count(), use_multiprocessing=False,
+                            callbacks=callbacks)
 
     # save weights
-    model.save(filepath=os.path.join(paths['weights_path'], '{model}_based_on_{base_model}.h5'.format(model=conf.model, base_model=conf.base_model)))
+    model.save(filepath=os.path.join(paths['checkpoints_path'], '{model}_based_on_{base}.h5'.format(model=conf.model, base=conf.base_model)))
 
 
 if __name__ == "__main__":
