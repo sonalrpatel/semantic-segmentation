@@ -71,17 +71,18 @@ parser.add("-ie",   "--epochs",                     type=int,       default=10, 
 parser.add("-ep",   "--final_epoch",                type=int,       default=20,                 help="final epoch for training with unfreezed backbone")
 parser.add("-fc",   "--checkpoint_freq",            type=int,       default=5,                  help="epoch interval to save a model checkpoint")
 parser.add("-fv",   "--validation_freq",            type=int,       default=1,                  help="how often to perform validation")
-parser.add("-s",    "--data_shuffle",               type=str2bool,  default=True,               help="whether to shuffle the data")
+parser.add("-s",    "--shuffle",                    type=str2bool,  default=True,               help="whether to shuffle the data")
 parser.add("-rs",   "--random_seed",                type=int,       default=None,               help="random shuffle seed")
 parser.add("-esp",  "--early_stopping_patience",    type=int,       default=10,                 help="patience for early-stopping due to converged validation mIoU")
 parser.add("-lr",   "--learning_rate",              type=float,     default=3e-4,               help="the initial learning rate")
-parser.add("-lrw",  "--lr_warmup",                  type=bool,      default=False,              help="whether to use lr warm up")
+parser.add("-lrw",  "--lr_warmup",                  type=str2bool,  default=False,              help="whether to use lr warm up")
 parser.add("-lrs",  "--lr_scheduler",               type=str,       default="cosine_decay",     help="strategy to schedule learning rate",
                     choices=["step_decay", "poly_decay", "cosine_decay"])
 parser.add("-ls",   "--loss",                       type=str,       default=None,               help="loss function for training")
 parser.add("-op",   "--optimizer",                  type=str,       default="adam",             help="The optimizer for training")
 parser.add("-od",   "--output_dir",                 type=str,       required=True,              help="output directory for TensorBoard and models")
 
+parser.add("-aug",  "--augment",                    type=str2bool,  default=False,              help="whether to perform data augmentation")
 parser.add("-ar",   "--data_aug_rate",              type=float,     default=0.0,                help="the rate of data augmentation")
 parser.add("-hf",   "--h_flip",                     type=str2bool,  default=False,              help="whether to randomly flip the image horizontally")
 parser.add("-vf",   "--v_flip",                     type=str2bool,  default=False,              help="whether to randomly flip the image vertically")
@@ -118,99 +119,124 @@ def train(*args):
     # check related paths
     paths = check_related_path(conf.output_dir)
 
-
-    # get image and label file names for training and validation
-    # get max_samples_training random training samples
-    # TODO: consider images and labels when there names matches
-    files_train_input = utils.get_files_recursive(conf.input_training)
-    files_train_label = utils.get_files_recursive(conf.label_training, "color")
-    _, idcs = utils.sample_list(files_train_label, n_samples=conf.max_samples_training)
-    files_train_input = np.take(files_train_input, idcs)
-    files_train_label = np.take(files_train_label, idcs)
-    image_shape_original_input = utils.load_image(files_train_input[0]).shape[0:2]
-    image_shape_original_label = utils.load_image(files_train_label[0]).shape[0:2]
-    print(f"Found {len(files_train_label)} training samples")
-
-    # get max_samples_validation random validation samples
-    files_valid_input = utils.get_files_recursive(conf.input_validation)
-    files_valid_label = utils.get_files_recursive(conf.label_validation, "color")
-    _, idcs = utils.sample_list(files_valid_label, n_samples=conf.max_samples_validation)
-    files_valid_input = np.take(files_valid_input, idcs)
-    files_valid_label = np.take(files_valid_label, idcs)
-    print(f"Found {len(files_valid_label)} validation samples")
-
     # parse one-hot-conversion.xml
     _, conf.one_hot_palette_label = utils.parse_convert_py(conf.one_hot_palette_label)
     assert conf.num_classes == len(conf.one_hot_palette_label)
 
     # data augmentation setting
-    # TODO
+    AUGMENTATIONS_TRAIN = Compose([HorizontalFlip(p=0.5)], p=1)
 
     # data generator
-    # build dataset pipeline parsing functions
-    def parse_sample(input_files, label_file):
-        # parse and process image
-        image = utils.load_image_op(input_files)
-        image = utils.resize_image_op(image, image_shape_original_input, conf.image_shape, interpolation=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
-        # normalise the image
-        image = utils.normalise_image_op(image)
-        
-        # parse and process label
-        label = utils.load_image_op(label_file)
-        label = utils.resize_image_op(label, image_shape_original_label, conf.image_shape, interpolation=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
-        # one hot encode the label
-        # label = utils.one_hot_encode_gray_op(label, conf.num_classes)
-        label = utils.one_hot_encode_label_op(label, conf.one_hot_palette_label)
-        return image, label
+    # read files from data path
+    def dataset_from_path(data_path: tuple, max_samples: int):
+        assert len(data_path) == 2
+        assert max_samples != 0
 
+        image_path, label_path = data_path
+
+        # list files
+        image_file = utils.get_files_recursive(image_path)
+        label_file = utils.get_files_recursive(label_path, "color")
+        _, ids = utils.sample_list(label_file, n_samples=max_samples)
+        image_file = np.take(image_file, ids)
+        label_file = np.take(label_file, ids)
+        data_path_ds = tf.data.Dataset.from_tensor_slices((image_file, label_file))
+
+        # original image & label shape
+        org_shape = {'image': utils.load_image(image_file[0]).shape[0:2], 'label': utils.load_image(label_file[0]).shape[0:2]}
+        
+        # load files
+        def load_files(image_file, label_file):
+            image = utils.load_image_op(image_file)
+            label = utils.load_image_op(label_file)
+            # dataset = tf.data.Dataset.zip((images, labels))
+            return image, label
+        
+        dataset = data_path_ds.map(load_files, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        
+        return dataset, len(dataset), org_shape
+
+    # preprocess dataset
+    def preprocess_dataset(dataset: tf.data.Dataset, org_shape: dict, augment: bool = False):
+        # resize image, label
+        dataset = dataset.map(lambda image, label:
+                              (utils.resize_image_op(image, org_shape['image'], conf.image_shape, interpolation=tf.image.ResizeMethod.NEAREST_NEIGHBOR),
+                               utils.resize_image_op(label, org_shape['label'], conf.image_shape, interpolation=tf.image.ResizeMethod.NEAREST_NEIGHBOR)),
+                              num_parallel_calls=tf.data.experimental.AUTOTUNE)
+
+        # augmentation
+        if augment:
+            dataset = dataset.map(Augment(101))
+                
+        # normalise image and one hot encode the label
+        dataset = dataset.map(lambda image, label: (utils.normalise_image_op(image), utils.one_hot_encode_label_op(label, conf.one_hot_palette_label)),
+                              num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        
+        return dataset
+
+
+    def configure_dataset(dataset: tf.data.Dataset, count: int = -1):
+        dataset = dataset.take(count)
+
+        if conf.shuffle:
+            dataset = dataset.shuffle(buffer_size=count, reshuffle_each_iteration=True)
+        
+        dataset = dataset.batch(conf.batch_size, drop_remainder=True, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        dataset = dataset.repeat(conf.epochs)
+        dataset = dataset.prefetch(1)
+
+        return dataset
+
+
+    # get image and label file names for training and validation
+    # get max_samples_training random training samples
+    # TODO: consider images and labels when there names matches
+    # print(f"Found {len(files_train_label)} training samples")
+
+    # get max_samples_validation random validation samples
+    # print(f"Found {len(files_valid_label)} validation samples")
     # build training data pipeline
-    dataTrain = tf.data.Dataset.from_tensor_slices((files_train_input, files_train_label))
-    dataTrain = dataTrain.shuffle(buffer_size=conf.max_samples_training, reshuffle_each_iteration=True)
-    dataTrain = dataTrain.map(parse_sample, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-    dataTrain = dataTrain.map(Augment(93))
-    dataTrain = dataTrain.batch(conf.batch_size, drop_remainder=True)
-    dataTrain = dataTrain.repeat(conf.epochs)
-    dataTrain = dataTrain.prefetch(1)
+    dataTrain, len_train, org_shape = dataset_from_path((conf.input_training, conf.label_training), conf.max_samples_training)
+    dataTrain = preprocess_dataset(dataTrain, org_shape, conf.augment)
+    dataTrain = configure_dataset(dataTrain, conf.max_samples_training)
     n_batches_train = dataTrain.cardinality().numpy() // conf.epochs
-    print("Built data pipeline for training with {} batches".format(n_batches_train))
+    print("Built data pipeline for {} training samples with {} batches per epoch".format(len_train, n_batches_train))
 
     # build validation data pipeline
-    dataValid = tf.data.Dataset.from_tensor_slices((files_valid_input, files_valid_label))
-    dataValid = dataValid.map(parse_sample, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-    dataValid = dataValid.batch(conf.valid_batch_size, drop_remainder=True)
-    dataValid = dataValid.repeat(conf.epochs)
-    dataValid = dataValid.prefetch(1)
+    dataValid, len_valid, org_shape = dataset_from_path((conf.input_validation, conf.label_validation), conf.max_samples_validation)
+    dataValid = preprocess_dataset(dataValid, org_shape)
+    dataValid = configure_dataset(dataValid, conf.max_samples_validation)
     n_batches_valid = dataValid.cardinality().numpy() // conf.epochs
-    print("Built data pipeline for validation with {} batches".format(n_batches_valid))
+    print("Built data pipeline for {} validation samples with {} batches per epoch".format(len_valid, n_batches_valid))
 
 
     # build the model
-    model, conf.base_model = model_builder(conf.num_classes, (conf.image_shape[0], conf.image_shape[1]), conf.model, conf.base_model,
-                                            conf.bm_weights)
+    # model, conf.base_model = model_builder(conf.num_classes, (conf.image_shape[0], conf.image_shape[1]), conf.model, conf.base_model,
+    #                                         conf.bm_weights)
 
     # instantiate Model
-    # MODEL_TYPE = 'DeepLabV3plus' # Unet
-    # BACKBONE = 'EfficientNetV2M'
-    # UNFREEZE_AT = 'block6a_expand_activation' # block4a_expand_activation
-    # INPUT_SHAPE = [256, 256, 3] # do not change
-    # OUTPUT_STRIDE = 32
-    # FILTERS = [16, 32, 64, 128, 256]
-    # ACTIVATION = 'leaky_relu' # swish, leaky_relu
-    # DROPOUT_RATE = 0
-    # PRETRAINED_WEIGHTS = None
-    # NUM_CLASSES = conf.num_classes
+    MODEL_TYPE = 'DeepLabV3plus' # Unet
+    BACKBONE = 'EfficientNetV2M'
+    UNFREEZE_AT = 'block6a_expand_activation' # block4a_expand_activation
+    INPUT_SHAPE = [256, 256, 3] # do not change
+    OUTPUT_STRIDE = 32
+    FILTERS = [16, 32, 64, 128, 256]
+    ACTIVATION = 'leaky_relu' # swish, leaky_relu
+    DROPOUT_RATE = 0
+    PRETRAINED_WEIGHTS = None
+    NUM_CLASSES = conf.num_classes
 
-    # model_function = eval(MODEL_TYPE)
-    # model = model_function(input_shape=INPUT_SHAPE,
-    #                         filters=FILTERS,
-    #                         num_classes=NUM_CLASSES,
-    #                         output_stride=OUTPUT_STRIDE,
-    #                         activation=ACTIVATION,
-    #                         dropout_rate=DROPOUT_RATE,
-    #                         backbone_name=BACKBONE,
-    #                         freeze_backbone=True,
-    #                         weights=PRETRAINED_WEIGHTS
-    #                         )
+    model_function = eval(MODEL_TYPE)
+    model = model_function(input_shape=INPUT_SHAPE,
+                            filters=FILTERS,
+                            num_classes=NUM_CLASSES,
+                            output_stride=OUTPUT_STRIDE,
+                            activation=ACTIVATION,
+                            dropout_rate=DROPOUT_RATE,
+                            backbone_name=BACKBONE,
+                            freeze_backbone=False,
+                            weights=PRETRAINED_WEIGHTS
+                            )
 
     # summary
     model.summary()
@@ -295,12 +321,12 @@ def train(*args):
 
     # callbacks setting
     # training and validation steps
-    steps_per_epoch     = n_batches_train
-    validation_steps    = n_batches_valid
+    steps_per_epoch     = int(n_batches_train)
+    validation_steps    = int(n_batches_valid)
     # create callbacks to be called after each epoch
-    class CustomCallback(keras.callbacks.Callback):
+    class CustomCallback(tf.keras.callbacks.Callback):
         def on_epoch_end(self, epoch, logs=None):
-            print("LR - {}".format(self.model.optimizer.learning_rate))
+            print("\nLearning Rate is {}".format(self.model.optimizer.lr))
         
     tensorboard_cb      = TensorBoard(paths['logs_path'], update_freq="epoch", profile_batch=0)
     csvlogger_cb        = CSVLogger(os.path.join(paths['checkpoints_path'], "log.csv"), append=True, separator=',')
@@ -333,7 +359,7 @@ def train(*args):
     print("\n***** Begin training *****")
     print("GPU -->", tf.config.list_physical_devices('GPU'))
     print("Dataset -->", conf.dataset)
-    print("Num Images -->", len(files_train_input))
+    print("Num Images -->", len_train)
     print("Model -->", conf.model)
     print("Base_model -->", conf.base_model)
     print("Image Shape -->", [conf.image_shape[0], conf.image_shape[1]])

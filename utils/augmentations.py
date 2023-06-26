@@ -36,8 +36,8 @@ class Augment(tf.keras.layers.Layer):
     def augment(self, seed, mode):
         model = Sequential()
         model.add(RandomFlip("horizontal", seed=seed))
-        # if mode=='image':
-        #     model.add(RandomBrightness(0.15, seed=seed))
-        #     model.add(RandomContrast(0.25, seed=seed))
-        #     model.add(RandomGaussianBlur(max_sigma=2, min_kernel_size=3, max_kernel_size=11))        
+        if mode=='image':
+            model.add(RandomBrightness(0.15, seed=seed))
+            model.add(RandomContrast(0.25, seed=seed))
+            model.add(RandomGaussianBlur(max_sigma=2, min_kernel_size=3, max_kernel_size=11))        
         return model

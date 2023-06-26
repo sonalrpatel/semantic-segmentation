@@ -1,38 +1,44 @@
+# dataset
 dataset: cityscapes
-input_training: C:\Users\pso9kor\Datasets\cityscapes\leftImg8bit_trainvaltest\leftImg8bit\train
-label_training: C:\Users\pso9kor\Datasets\cityscapes\gtFine_trainvaltest\gtFine\train
+input_training: D:\Datasets\cityscapes\leftImg8bit_trainvaltest\leftImg8bit\train
+label_training: D:\Datasets\cityscapes\gtFine_trainvaltest\gtFine\train
 max_samples_training: 10000
-input_validation: C:\Users\pso9kor\Datasets\cityscapes\leftImg8bit_trainvaltest\leftImg8bit\val
-label_validation: C:\Users\pso9kor\Datasets\cityscapes\gtFine_trainvaltest\gtFine\val
+input_validation: D:\Datasets\cityscapes\leftImg8bit_trainvaltest\leftImg8bit\val
+label_validation: D:\Datasets\cityscapes\gtFine_trainvaltest\gtFine\val
 max_samples_validation: 2000
-
-# one_hot_palette_label: config\class.camvid.xml
 one_hot_palette_label: config\labels.py
-
-image_shape: [256, 256]
 num_classes: 20
+
+# model
+image_shape: [256, 256]
 model: UNet
 base_model: ResNet50_KA
 bm_weights: 'imagenet'
 
+# epochs
 epochs: 10
 final_epoch: 40
-batch_size: 8
+batch_size: 4
 valid_batch_size: 8
+shuffle: true
+augment: true
+
+# hyper parameters
+random_seed: 101
 learning_rate: 1e-4
 early_stopping_patience: 10
-loss: self_balanced_focal_loss
-optimizer: adam
+loss: FocalHybridLoss
+optimizer: Adam
 
-checkpoint_freq: 5
+# output directory
 output_dir: output
 
-# model-weights
+# model weights
 # weights: output\2023-06-22-08-58-26\checkpoints\best_weights.h5
 weights: output\2023-06-22-08-58-26\weights\saved_model.pb
 
 
 # for predict.py only
-input_testing: C:\Users\pso9kor\Datasets\cityscapes\leftImg8bit_trainvaltest\leftImg8bit\test
-label_testing: C:\Users\pso9kor\Datasets\cityscapes\gtFine_trainvaltest\gtFine\test
+input_testing: D:\Datasets\cityscapes\leftImg8bit_trainvaltest\leftImg8bit\test
+label_testing: D:\Datasets\cityscapes\gtFine_trainvaltest\gtFine\test
 max_samples_testing: 5

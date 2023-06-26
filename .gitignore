@@ -6,6 +6,7 @@
 *.bkp
 *.dtmp
 *.ini
+*.pyc
 
 # Files in Data folder
 *.DS_Store
