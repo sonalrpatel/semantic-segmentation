@@ -107,6 +107,8 @@ def resize_image_op(img, fromShape, toShape, cropToPreserveAspectRatio=True, int
 
         # then resize to target shape
         img = tf.image.resize(img, toShape, method=interpolation)
+    
+    img = tf.cast(img, dtype=tf.uint8)
     return img
 
 
@@ -287,6 +289,10 @@ def parse_convert_py(conversion_file_path):
     labels = module.labels
     one_hot_palette_label_values = [list(labels[k].color) for k in range(len(labels)) if labels[k].trainId >= 0 and labels[k].trainId < 255]
     one_hot_palette_label_names = [labels[k].name for k in range(len(labels)) if labels[k].trainId >= 0 and labels[k].trainId < 255]
+
+    print("Number of classes - ", len(one_hot_palette_label_values))
+    for name, color in zip(one_hot_palette_label_names, one_hot_palette_label_values):
+        print(f"{name} - {color}")
 
     return one_hot_palette_label_names, one_hot_palette_label_values
 

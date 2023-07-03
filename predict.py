@@ -16,7 +16,7 @@ import configargparse
 import sys
 import cv2
 import os
-from utils.models.SegmentationModels import Unet, Residual_Unet, Attention_Unet, Unet_plus, DeepLabV3plus
+from models.models_segmentation import Unet, Residual_Unet, Attention_Unet, Unet_plus, DeepLabV3plus
 
 appl = tf.keras.applications
 

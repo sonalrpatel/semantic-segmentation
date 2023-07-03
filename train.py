@@ -49,9 +49,10 @@ def str2bool(v):
 
 # parse parameters from config file or CLI
 parser = configargparse.ArgParser()
-parser.add("-c",    "--config",     is_config_file=True,    default="config/config.semseg.cityscapes.yml", help="config file")
+parser.add("-c",    "--config",     is_config_file=True,            default="config/config.semseg.cityscapes.yml", help="config file")
 # parser.add("-c",    "--config",                     is_config_file=True,                        help="config file")
-parser.add("-d",    "--dataset",                    type=str,       default="CamVid",           help="the name of the dataset")
+parser.add("-lp",   "--loop_training",              type=str2bool,  default=False,              help="training in loop from main")
+parser.add("-d",    "--dataset",                    type=str,       default=None,               help="the name of the dataset")
 parser.add("-it",   "--input_training",             type=str,       required=True,              help="directory/directories of input samples for training")
 parser.add("-lt",   "--label_training",             type=str,       required=True,              help="directory of label samples for training")
 parser.add("-nt",   "--max_samples_training",       type=int,       default=None,               help="maximum number of training samples")
@@ -59,7 +60,7 @@ parser.add("-iv",   "--input_validation",           type=str,       required=Tru
 parser.add("-lv",   "--label_validation",           type=str,       required=True,              help="directory of label samples for validation")
 parser.add("-nv",   "--max_samples_validation",     type=int,       default=None,               help="maximum number of validation samples")
 parser.add("-is",   "--image_shape",                type=int,       required=True, nargs=2,     help="image dimensions (HxW) of inputs and labels for network")
-parser.add("-nc",   "--num_classes",                type=int,       default=32,                 help="The number of classes to be segmented")
+parser.add("-nc",   "--num_classes",                type=int,       default=32,                 help="the number of classes to be segmented")
 parser.add("-ohl",  "--one_hot_palette_label",      type=str,       required=True,              help="xml-file for one-hot-conversion of labels")
 parser.add("-m",    "--model",                      type=str,       required=True,              help="choose the semantic segmentation methods")
 parser.add("-bm",   "--base_model",                 type=str,       default=None,               help="choose the base model")
@@ -97,16 +98,17 @@ def train(*args):
     # read CLI
     conf, unknown = parser.parse_known_args()
 
-    # check args
-    if len(args) != 0:
-        assert len(args) == 2
-        
-        # update model per input from main for running train() in loop of models
-        if args[0] == 'model':
-            conf.model = args[1]
-        # update loss per input from main for running train() in loop of losses
-        if args[0] == 'loss':
-            conf.loss = args[1]
+    # check args if conf.loop_training is true
+    if conf.loop_training is True:
+        if len(args) != 0:
+            assert len(args) == 2
+            
+            # update model per input from main for running train() in loop of models
+            if args[0] == 'model':
+                conf.model = args[1]
+            # update loss per input from main for running train() in loop of losses
+            if args[0] == 'loss':
+                conf.loss = args[1]
 
     # determine absolute filepaths
     conf.input_training   = utils.abspath(conf.input_training)
@@ -123,8 +125,27 @@ def train(*args):
     _, conf.one_hot_palette_label = utils.parse_convert_py(conf.one_hot_palette_label)
     assert conf.num_classes == len(conf.one_hot_palette_label)
 
-    # data augmentation setting
-    AUGMENTATIONS_TRAIN = Compose([HorizontalFlip(p=0.5)], p=1)
+    def one_hot_encode_label_op(mask, color_map):
+        one_hot_map = []
+        for color in color_map:
+            class_map = tf.zeros(mask.shape[0:2], dtype=tf.int32)
+            # find instances of color and append layer to one-hot-map
+            class_map = tf.bitwise.bitwise_or(class_map, tf.cast(tf.reduce_all(tf.equal(mask, color), axis=-1), tf.int32))
+            one_hot_map.append(class_map)
+
+        # finalize one-hot-map
+        one_hot_map = tf.stack(one_hot_map, axis=-1)
+        one_hot_map = tf.cast(one_hot_map, tf.float32)
+        return one_hot_map
+    
+    def do_augmentation(img, flip=0, mask=False):
+        if mask is False:
+            img = tf.image.random_brightness(img, max_delta=0.5)
+            img = tf.image.random_saturation(img, lower=0.5, upper=1.5)
+            img = tf.image.random_hue(img, max_delta=0.2)
+            img = tf.image.random_contrast(img, lower=0.5, upper=1.5)
+        img = tf.case([(tf.greater(flip, 0), lambda: tf.image.flip_left_right(img))], default=lambda: img)
+        return img
 
     # data generator
     # read files from data path
@@ -149,41 +170,36 @@ def train(*args):
         def load_files(image_file, label_file):
             image = utils.load_image_op(image_file)
             label = utils.load_image_op(label_file)
-            # dataset = tf.data.Dataset.zip((images, labels))
             return image, label
         
         dataset = data_path_ds.map(load_files, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-        
         return dataset, len(dataset), org_shape
 
     # preprocess dataset
     def preprocess_dataset(dataset: tf.data.Dataset, org_shape: dict, augment: bool = False):
-        # resize image, label
-        dataset = dataset.map(lambda image, label:
-                              (utils.resize_image_op(image, org_shape['image'], conf.image_shape, interpolation=tf.image.ResizeMethod.NEAREST_NEIGHBOR),
-                               utils.resize_image_op(label, org_shape['label'], conf.image_shape, interpolation=tf.image.ResizeMethod.NEAREST_NEIGHBOR)),
-                              num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        # load data
+        def load_data(image, label):
+            image = utils.resize_image_op(image, org_shape['image'], conf.image_shape, interpolation=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+            label = utils.resize_image_op(label, org_shape['label'], conf.image_shape, interpolation=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+            
+            if augment is True:
+                image = do_augmentation(image)
+                label = do_augmentation(label, mask=True)
+            
+            image = utils.normalise_image_op(image)
+            label = one_hot_encode_label_op(label, conf.one_hot_palette_label)
+            return image, label
 
-        # augmentation
-        if augment:
-            dataset = dataset.map(Augment(101))
-                
-        # normalise image and one hot encode the label
-        dataset = dataset.map(lambda image, label: (utils.normalise_image_op(image), utils.one_hot_encode_label_op(label, conf.one_hot_palette_label)),
-                              num_parallel_calls=tf.data.experimental.AUTOTUNE)
-        
+        dataset = dataset.map(load_data, num_parallel_calls=tf.data.experimental.AUTOTUNE)
         return dataset
 
-
-    def configure_dataset(dataset: tf.data.Dataset, count: int = -1):
-        dataset = dataset.take(count)
-
+    def configure_dataset(dataset: tf.data.Dataset):
+        # dataset = dataset.take(count)
         if conf.shuffle:
-            dataset = dataset.shuffle(buffer_size=count, reshuffle_each_iteration=True)
-        
+            dataset = dataset.shuffle(buffer_size=1000)
         dataset = dataset.batch(conf.batch_size, drop_remainder=True, num_parallel_calls=tf.data.experimental.AUTOTUNE)
         dataset = dataset.repeat(conf.epochs)
-        dataset = dataset.prefetch(1)
+        dataset = dataset.prefetch(tf.data.experimental.AUTOTUNE)
 
         return dataset
 
@@ -198,14 +214,14 @@ def train(*args):
     # build training data pipeline
     dataTrain, len_train, org_shape = dataset_from_path((conf.input_training, conf.label_training), conf.max_samples_training)
     dataTrain = preprocess_dataset(dataTrain, org_shape, conf.augment)
-    dataTrain = configure_dataset(dataTrain, conf.max_samples_training)
+    dataTrain = configure_dataset(dataTrain)
     n_batches_train = dataTrain.cardinality().numpy() // conf.epochs
     print("Built data pipeline for {} training samples with {} batches per epoch".format(len_train, n_batches_train))
 
     # build validation data pipeline
     dataValid, len_valid, org_shape = dataset_from_path((conf.input_validation, conf.label_validation), conf.max_samples_validation)
     dataValid = preprocess_dataset(dataValid, org_shape)
-    dataValid = configure_dataset(dataValid, conf.max_samples_validation)
+    dataValid = configure_dataset(dataValid)
     n_batches_valid = dataValid.cardinality().numpy() // conf.epochs
     print("Built data pipeline for {} validation samples with {} batches per epoch".format(len_valid, n_batches_valid))
 
@@ -374,9 +390,9 @@ def train(*args):
     print("\tOptimizer -->", conf.optimizer)
     print("\tLr Scheduler -->", conf.lr_scheduler)
 
-    # print("")
-    # print("Data Augmentation:")
-    # print("\tData Augmentation Rate -->", conf.data_aug_rate)
+    print("")
+    print("Data Augmentation:")
+    print("\tData Augmentation Enable -->", conf.augment)
     # print("\tVertical Flip -->", conf.v_flip)
     # print("\tHorizontal Flip -->", conf.h_flip)
     # print("\tBrightness Alteration -->", conf.brightness)
