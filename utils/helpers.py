@@ -1,5 +1,5 @@
 """
-The implementation of some helpers.
+The implementation of some helpers for path and file operations.
 
 @Author: Yang Lu
 @Github: https://github.com/luyanger1799
@@ -11,12 +11,15 @@ import pandas as pd
 import warnings
 import csv
 import os
+import sys
+import importlib
+import xml.etree.ElementTree as xmlET
 import tensorflow as tf
 from datetime import datetime
 from tqdm import tqdm
 
-utils = tf.keras.utils
 tf_image = tf.keras.preprocessing.image
+
 
 def get_dataset_info(dataset_path):
     image_label_paths = check_dataset_path(dataset_path)
@@ -131,14 +134,48 @@ def get_evaluated_classes(file_path):
     return evaluated_classes
 
 
-def color_encode(image, color_values):
-    color_codes = np.array(color_values)
-    x = color_codes[image.astype(int)]
+"""
+The following are some additional implementation for files and images handling.
 
-    return x
+@Project: https://github.com/sonalrpatel/semantic-segmentation
+
+"""
+def abspath(path):
+    abspath = os.path.abspath(os.path.expanduser(path))
+    if not os.path.exists(path):
+        raise ValueError('The path "{}" does not exist.'.format(abspath))
+    return abspath
 
 
-# Get class names and labels
+def flatten(list):
+    return [item for sublist in list for item in sublist]
+
+
+def get_folders_in_folder(folder):
+    return [f[0] for f in os.walk(folder)][1:]
+
+
+def get_files_in_folder(folder, pattern=None):
+    if pattern is None:
+        return sorted([os.path.join(folder, f) for f in os.listdir(folder)])
+    else:
+        return sorted([os.path.join(folder, f) for f in os.listdir(folder) if pattern in f])
+
+
+def get_files_recursive(folder, pattern=None):
+    if not bool(get_folders_in_folder(folder)):
+        return get_files_in_folder(folder, pattern)
+    else:
+        return flatten([get_files_in_folder(f, pattern) for f in get_folders_in_folder(folder)])
+
+
+def sample_list(*ls, n_samples, replace=False):
+    n_samples = min(len(ls[0]), n_samples)
+    ids = np.random.choice(np.arange(0, len(ls[0])), n_samples, replace=replace)
+    samples = zip([np.take(l, ids) for l in ls])
+    return samples, ids
+
+
 def get_class_info(class_path):
     """
     Retrieve the class names and RGB values for the selected dataset.
@@ -163,7 +200,7 @@ def get_class_info(class_path):
 
     class_names = []
     class_labels = []
-    for index, item in class_dict.iterrows():
+    for index, item in tqdm(class_dict.iterrows()):
         class_names.append(item[0])
         try:
             class_labels.append(np.array([item['red'], item['green'], item['blue']]))
@@ -174,106 +211,46 @@ def get_class_info(class_path):
                 print("Column names are not appropriate")
                 break
 
-    return len(class_names), class_names, class_labels
+    return class_names, class_labels
 
 
-# Get labeled segmentation mask
-def label_segmentation_mask(seg, class_labels):
-    """
-    Given a 3D (W, H, depth=3) segmentation mask, prepare a 2D labeled segmentation mask
+def parse_convert_xml(conversion_file_path):
+    defRoot = xmlET.parse(conversion_file_path).getroot()
 
-    # Arguments
-        seg: The segmentation mask where each cell of depth provides the r, g, and b values
-        class_labels
+    one_hot_palette = []
+    class_list = []
+    for idx, defElement in enumerate(defRoot.findall("SLabel")):
+        from_color = np.fromstring(defElement.get("fromColour"), dtype=int, sep=" ")
+        to_class = np.fromstring(defElement.get("toValue"), dtype=int, sep=" ")
+        if to_class in class_list:
+             one_hot_palette[class_list.index(to_class)].append(from_color)
+        else:
+            one_hot_palette.append([from_color])
+            class_list.append(to_class)
 
-    # Returns
-        Labeled segmentation mask where each cell provides its label value
-    """
-    seg = seg.astype("uint8")
-
-    # returns a 2D matrix of size W x H of the segmentation mask
-    label = np.zeros(seg.shape[:2], dtype=np.uint8)
-
-    for i, rgb in enumerate(class_labels):
-        label[(seg == rgb).all(axis=2)] = i
-
-    return label
+    return one_hot_palette
 
 
-def one_hot_image(seg, class_labels):
-    """
-    Convert a segmentation mask label array to one-hot format
-    by replacing each pixel value with a vector of length num_classes
+def parse_convert_py(conversion_file_path):
+    module_name = os.path.splitext(os.path.basename(conversion_file_path))[0]
+    module_path = os.path.abspath(os.path.expanduser(conversion_file_path))
+    module_dir = os.path.dirname(module_path)
+    sys.path.append(module_dir)
+    modules = importlib.import_module(module_name, package=module_path)
 
-    # Arguments
-        seg: The 3D array segmentation mask
-        class_labels
-
-    # Returns
-        A 3D array with the same width and height as the input, but
-        with a depth size of num_classes
-    """
-    num_classes = len(class_labels)  # seg dim = H*W*3
-    label = label_segmentation_mask(seg, class_labels)  # label dim = H*W
-    one_hot = utils.to_categorical(label, num_classes)  # one_hot dim = H*W*N
-
-    return one_hot
+    return modules
 
 
-def reverse_one_hot(image):
-    """
-    Transform a 2D array in one-hot format (depth is num_classes),
-    to a 2D array with only 1 channel, where each pixel value is
-    the classified class key.
+def get_labels(modules):
+    labels = modules.labels
+    class_names = [labels[k].name for k in range(len(labels)) if labels[k].trainId >= 0 and labels[k].trainId < 255]    
+    class_colors = [list(labels[k].color) for k in range(len(labels)) if labels[k].trainId >= 0 and labels[k].trainId < 255]
 
-    # Arguments
-        image: The one-hot format image
+    print("Number of classes - ", len(class_colors))
+    for name, color in zip(class_names, class_colors):
+        print(f"{name} - {color}")
 
-    # Returns
-        A 2D array with the same width and hieght as the input, but
-        with a depth size of 1, where each pixel value is the classified
-        class key.
-    """
-    w = image.shape[0]
-    h = image.shape[1]
-    x = np.zeros([w, h, 1])
-
-    for i in range(0, w):
-        for j in range(0, h):
-            index, value = max(enumerate(image[i, j, :]), key=operator.itemgetter(1))
-            x[i, j] = index
-
-    x = np.argmax(image, axis=-1)
-
-    return x
-
-
-def make_prediction(model, img=None, img_path=None, shape=None):
-    """
-    Predict the hot encoded categorical label from the image.
-    Later, convert it numerical label.
-    """
-    if img is not None:  # dim = H*W*3
-        img = np.expand_dims(img, axis=0)  # dim = 1*H*W*3
-    if img_path is not None:
-        img = tf_image.img_to_array(tf_image.load_img(img_path, target_size=shape)) / 255.
-        img = np.expand_dims(img, axis=0)  # dim = 1*H*W*3
-    label = model.predict(img)  # dim = 1*H*W*N
-    label = np.argmax(label[0], axis=2)  # dim = H*W
-
-    return label
-
-
-def form_color_mask(label, mapping):
-    """
-    Generate the color mask from the numerical label
-    """
-    h, w = label.shape  # dim = H*W
-    mask = np.zeros((h, w, 3), dtype=np.uint8)  # dim = H*W*3
-    mask = mapping[label]
-    mask = mask.astype(np.uint8)
-
-    return mask
+    return class_names, class_colors
 
 
 def count_pixels(seg_path, class_path):

@@ -6,15 +6,15 @@ The file defines the training process.
 @Project: https://github.com/luyanger1799/amazing-semantic-segmentation
 
 """
-from utils.helpers import check_related_path
 from utils.callbacks import LearningRateScheduler
 from utils.optimizers import *
 from utils.learning_rate import *
 from utils.metrics import MeanIoU
 from utils.loss_func import *
-from utils.loss_functions import *
+from utils.loss_function import *
 from utils.losses import *
-from utils.losses_segmentation import IoULoss, DiceLoss, TverskyLoss, FocalTverskyLoss, HybridLoss, FocalHybridLoss
+from utils.loss_segmentation import IoULoss, DiceLoss, TverskyLoss, FocalTverskyLoss, HybridLoss, FocalHybridLoss
+from utils.helpers import *
 from utils import utils
 from builders import model_builder
 from models.models_segmentation import Unet, Residual_Unet, Attention_Unet, Unet_plus, DeepLabV3plus
@@ -28,7 +28,6 @@ from keras.callbacks import TensorBoard, CSVLogger, ModelCheckpoint, EarlyStoppi
 import configargparse
 import os
 
-from utils.augmentations import Augment
 from albumentations import (
     Compose, HorizontalFlip, CLAHE, HueSaturationValue, GridDropout, ColorJitter,
     RandomBrightnessContrast, RandomGamma, OneOf, Rotate, RandomSunFlare, Cutout,
@@ -61,7 +60,7 @@ parser.add("-lv",   "--label_validation",           type=str,       required=Tru
 parser.add("-nv",   "--max_samples_validation",     type=int,       default=None,               help="maximum number of validation samples")
 parser.add("-is",   "--image_shape",                type=int,       required=True, nargs=2,     help="image dimensions (HxW) of inputs and labels for network")
 parser.add("-nc",   "--num_classes",                type=int,       default=32,                 help="the number of classes to be segmented")
-parser.add("-ohl",  "--one_hot_palette_label",      type=str,       required=True,              help="xml-file for one-hot-conversion of labels")
+parser.add("-lf",   "--label_file",                 type=str,       required=True,              help="py/xml-file describing the label classes and color values")
 parser.add("-m",    "--model",                      type=str,       required=True,              help="choose the semantic segmentation methods")
 parser.add("-bm",   "--base_model",                 type=str,       default=None,               help="choose the base model")
 parser.add("-mw",   "--model_weights",              type=str,       default=None,               help="weights file of trained model for training continuation")
@@ -80,7 +79,7 @@ parser.add("-lrw",  "--lr_warmup",                  type=str2bool,  default=Fals
 parser.add("-lrs",  "--lr_scheduler",               type=str,       default="cosine_decay",     help="strategy to schedule learning rate",
                     choices=["step_decay", "poly_decay", "cosine_decay"])
 parser.add("-ls",   "--loss",                       type=str,       default=None,               help="loss function for training")
-parser.add("-op",   "--optimizer",                  type=str,       default="adam",             help="The optimizer for training")
+parser.add("-op",   "--optimizer",                  type=str,       default="adam",             help="the optimizer for training")
 parser.add("-od",   "--output_dir",                 type=str,       required=True,              help="output directory for TensorBoard and models")
 
 parser.add("-aug",  "--augment",                    type=str2bool,  default=False,              help="whether to perform data augmentation")
@@ -121,96 +120,10 @@ def train(*args):
     # check related paths
     paths = check_related_path(conf.output_dir)
 
-    # parse one-hot-conversion.xml
-    _, conf.one_hot_palette_label = utils.parse_convert_py(conf.one_hot_palette_label)
-    assert conf.num_classes == len(conf.one_hot_palette_label)
+    # get class names and class colors by parsing the labels py file
+    class_names, class_colors = get_labels(parse_convert_py(conf.label_file))
+    assert conf.num_classes == len(class_names)
 
-    def one_hot_encode_label_op(mask, color_map):
-        one_hot_map = []
-        for color in color_map:
-            class_map = tf.zeros(mask.shape[0:2], dtype=tf.int32)
-            # find instances of color and append layer to one-hot-map
-            class_map = tf.bitwise.bitwise_or(class_map, tf.cast(tf.reduce_all(tf.equal(mask, color), axis=-1), tf.int32))
-            one_hot_map.append(class_map)
-
-        # finalize one-hot-map
-        one_hot_map = tf.stack(one_hot_map, axis=-1)
-        one_hot_map = tf.cast(one_hot_map, tf.float32)
-        return one_hot_map
-    
-    def do_augmentation(img, flip=0, mask=False):
-        if mask is False:
-            img = tf.image.random_brightness(img, max_delta=0.5)
-            img = tf.image.random_saturation(img, lower=0.5, upper=1.5)
-            img = tf.image.random_hue(img, max_delta=0.2)
-            img = tf.image.random_contrast(img, lower=0.5, upper=1.5)
-        img = tf.case([(tf.greater(flip, 0), lambda: tf.image.flip_left_right(img))], default=lambda: img)
-        return img
-
-    # data generator
-    # read files from data path
-    def dataset_from_path(data_path: tuple, max_samples: int):
-        assert len(data_path) == 2
-        assert max_samples != 0
-
-        image_path, label_path = data_path
-
-        # list files
-        image_file = utils.get_files_recursive(image_path)
-        label_file = utils.get_files_recursive(label_path, "color")
-        _, ids = utils.sample_list(label_file, n_samples=max_samples)
-        image_file = np.take(image_file, ids)
-        label_file = np.take(label_file, ids)
-        data_path_ds = tf.data.Dataset.from_tensor_slices((image_file, label_file))
-
-        # original image & label shape
-        org_shape = {'image': utils.load_image(image_file[0]).shape[0:2], 'label': utils.load_image(label_file[0]).shape[0:2]}
-        
-        # load files
-        def load_files(image_file, label_file):
-            image = utils.load_image_op(image_file)
-            label = utils.load_image_op(label_file)
-            return image, label
-        
-        dataset = data_path_ds.map(load_files, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-        return dataset, len(dataset), org_shape
-
-    # preprocess dataset
-    def preprocess_dataset(dataset: tf.data.Dataset, org_shape: dict, augment: bool = False):
-        # load data
-        def load_data(image, label):
-            image = utils.resize_image_op(image, org_shape['image'], conf.image_shape, interpolation=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
-            label = utils.resize_image_op(label, org_shape['label'], conf.image_shape, interpolation=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
-            
-            if augment is True:
-                image = do_augmentation(image)
-                label = do_augmentation(label, mask=True)
-            
-            image = utils.normalise_image_op(image)
-            label = one_hot_encode_label_op(label, conf.one_hot_palette_label)
-            return image, label
-
-        dataset = dataset.map(load_data, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-        return dataset
-
-    def configure_dataset(dataset: tf.data.Dataset):
-        # dataset = dataset.take(count)
-        if conf.shuffle:
-            dataset = dataset.shuffle(buffer_size=1000)
-        dataset = dataset.batch(conf.batch_size, drop_remainder=True, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-        dataset = dataset.repeat(conf.epochs)
-        dataset = dataset.prefetch(tf.data.experimental.AUTOTUNE)
-
-        return dataset
-
-
-    # get image and label file names for training and validation
-    # get max_samples_training random training samples
-    # TODO: consider images and labels when there names matches
-    # print(f"Found {len(files_train_label)} training samples")
-
-    # get max_samples_validation random validation samples
-    # print(f"Found {len(files_valid_label)} validation samples")
     # build training data pipeline
     dataTrain, len_train, org_shape = dataset_from_path((conf.input_training, conf.label_training), conf.max_samples_training)
     dataTrain = preprocess_dataset(dataTrain, org_shape, conf.augment)

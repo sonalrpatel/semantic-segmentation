@@ -6,11 +6,12 @@ The implementation of Data Generator based on Tensorflow.
 @Project: https://github.com/luyanger1799/amazing-semantic-segmentation
 
 """
+import numpy as np
+import tensorflow as tf
 from tensorflow.python.keras.preprocessing.image import Iterator
 from keras_applications import imagenet_utils
+from utils.helpers import *
 from utils.utils import *
-import tensorflow as tf
-import numpy as np
 
 keras_utils = tf.keras.utils
 
@@ -71,7 +72,7 @@ class DataIterator(Iterator):
 
             image = imagenet_utils.preprocess_input(image.astype('float32'), data_format='channels_last',
                                                     mode='torch')
-            label = one_hot(label, self.num_classes)
+            label = one_hot_encode_gray(label, self.num_classes)
 
             batch_x[i], batch_y[i] = image, label
 
@@ -113,3 +114,84 @@ class ImageDataGenerator(object):
                             shuffle=shuffle,
                             seed=seed,
                             data_aug_rate=data_aug_rate)
+
+
+"""
+The following is for Dataset Generation using tf.data.Dataset method.
+
+@Project: https://github.com/sonalrpatel/semantic-segmentation
+
+"""
+class DatasetGenerator(object):
+    def __init__(self,
+                 data_path=None,
+                 max_samples=0,
+                 image_shape=(256, 256),
+                 augment=False,
+                 class_colors=None,
+                 shuffle=True,
+                 batch_size=4,
+                 epochs=10):
+        assert max_samples != 0
+        assert len(data_path) == 2
+        assert len(image_shape) == 2
+        
+        image_path, label_path = data_path
+        
+        self.image_path = image_path
+        self.label_path = label_path
+        self.max_samples = max_samples
+        self.image_shape = image_shape
+        self.augment = augment
+        self.class_colors = class_colors
+        self.shuffle = shuffle
+        self.batch_size = batch_size
+        self.epochs = epochs
+
+    # read files from data path
+    def dataset_from_path(self):
+        # list files
+        image_file = get_files_recursive(self.image_path)
+        label_file = get_files_recursive(self.label_path, "color")
+        _, ids = sample_list(label_file, n_samples=self.max_samples)
+        image_file = np.take(image_file, ids)
+        label_file = np.take(label_file, ids)
+        data_path_ds = tf.data.Dataset.from_tensor_slices((image_file, label_file))
+
+        # original image & label shape
+        org_shape = {'image': load_image(image_file[0]).shape[0:2], 'label': load_image(label_file[0]).shape[0:2]}
+        
+        # load files
+        def load_files(image_file, label_file):
+            image = load_image_op(image_file)
+            label = load_image_op(label_file)
+            return image, label
+        
+        dataset = data_path_ds.map(load_files, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        return dataset, len(dataset), org_shape
+
+    # preprocess dataset
+    def preprocess_dataset(self, dataset: tf.data.Dataset, org_shape: dict):
+        # load data
+        def load_data(image, label):
+            image = resize_image_op(image, org_shape['image'], self.image_shape, interpolation=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+            label = resize_image_op(label, org_shape['label'], self.image_shape, interpolation=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+            
+            if self.augment is True:
+                image = do_augmentation(image)
+                label = do_augmentation(label, mask=True)
+            
+            image = normalize_image_op(image)
+            label = one_hot_encode_op(label, self.class_colors)
+            return image, label
+
+        dataset = dataset.map(load_data, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        return dataset
+
+    def configure_dataset(self, dataset: tf.data.Dataset):
+        if self.shuffle:
+            dataset = dataset.shuffle(buffer_size=1000)
+        dataset = dataset.batch(self.batch_size, drop_remainder=True, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        dataset = dataset.repeat(self.epochs)
+        dataset = dataset.prefetch(tf.data.experimental.AUTOTUNE)
+        return dataset

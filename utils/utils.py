@@ -1,82 +1,38 @@
 """
-The implementation of some utils.
+The implementation of some utils for loading and processing images.
 
 @Author: Yang Lu
 @Github: https://github.com/luyanger1799
 @Project: https://github.com/luyanger1799/amazing-semantic-segmentation
 
 """
-from keras_preprocessing import image as keras_image
-from PIL import Image
-import sys
 import numpy as np
-import tensorflow as tf
-import xml.etree.ElementTree as xmlET
 import cv2
-import glob
-import os
-import importlib
+import tensorflow as tf
 
-
-def abspath(path):
-    abspath = os.path.abspath(os.path.expanduser(path))
-    if not os.path.exists(path):
-        raise ValueError('The path "{}" does not exist.'.format(abspath))
-    return abspath
-
-
-def flatten(list):
-    return [item for sublist in list for item in sublist]
-
-def get_folders_in_folder(folder):
-    return [f[0] for f in os.walk(folder)][1:]
-
-def get_files_in_folder(folder, pattern=None):
-    if pattern is None:
-        return sorted([os.path.join(folder, f) for f in os.listdir(folder)])
-    else:
-        return sorted([os.path.join(folder, f) for f in os.listdir(folder) if pattern in f])
-
-def get_files_recursive(folder, pattern=None):
-    if not bool(get_folders_in_folder(folder)):
-        return get_files_in_folder(folder, pattern)
-    else:
-        return flatten([get_files_in_folder(f, pattern) for f in get_folders_in_folder(folder)])
-
-
-def sample_list(*ls, n_samples, replace=False):
-    n_samples = min(len(ls[0]), n_samples)
-    idcs = np.random.choice(np.arange(0, len(ls[0])), n_samples, replace=replace)
-    samples = zip([np.take(l, idcs) for l in ls])
-    return samples, idcs
+utils = tf.keras.utils
+tf_image = tf.keras.preprocessing.image
 
 
 def load_image(filename):
-    # img = Image.open(name)
-    # return np.array(img)    
     img = cv2.imread(filename)
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    
     return img
 
 
 def load_image_op(filename):
     img = tf.io.read_file(filename)
     img = tf.image.decode_png(img, channels=3)
+    
     return img
-
-
-# def resize_image(image, label, target_size=None):
-#     if target_size is not None:
-#         image = cv2.resize(image, dsize=target_size[::-1])
-#         label = cv2.resize(label, dsize=target_size[::-1], interpolation=cv2.INTER_NEAREST)
-#     return image, label
 
 
 def resize_image(img, shape, interpolation=cv2.INTER_CUBIC):
     # resize relevant image axis to length of corresponding target axis while preserving aspect ratio
     axis = 0 if float(shape[0]) / float(img.shape[0]) > float(shape[1]) / float(img.shape[1]) else 1
     factor = float(shape[axis]) / float(img.shape[axis])
-    img = cv2.resize(img, (0,0), fx=factor, fy=factor, interpolation=interpolation)
+    img = cv2.resize(img, (0, 0), fx=factor, fy=factor, interpolation=interpolation)
 
     # crop other image axis to match target shape
     center = img.shape[int(not axis)] / 2.0
@@ -87,6 +43,7 @@ def resize_image(img, shape, interpolation=cv2.INTER_CUBIC):
         img = img[:, left:right]
     else:
         img = img[left:right, :]
+    
     return img
 
 
@@ -112,12 +69,11 @@ def resize_image_op(img, fromShape, toShape, cropToPreserveAspectRatio=True, int
     return img
 
 
-def normalise_image(img):
-    # 3-D numpy with mean ~= 0 and variance ~= 1
+def normalize_image(img):
     return img / 255.
 
 
-def normalise_image_op(img):
+def normalize_image_op(img):
     # 3-D tensor with mean ~= 0 and variance ~= 1
     return tf.image.per_image_standardization(img)
 
@@ -136,6 +92,7 @@ def random_crop(image, label, crop_size):
 
     cropped_image = image[h_beg:h_beg + crop_h, w_beg:w_beg + crop_w]
     cropped_label = label[h_beg:h_beg + crop_h, w_beg:w_beg + crop_w]
+
     return cropped_image, cropped_label
 
 
@@ -153,8 +110,9 @@ def random_zoom(image, label, zoom_range):
                          'a tuple or list of two floats. '
                          'Received: %s' % (zoom_range,))
 
-    image = keras_image.apply_affine_transform(image, zx=zx, zy=zy, fill_mode='nearest')
-    label = keras_image.apply_affine_transform(label, zx=zx, zy=zy, fill_mode='nearest')
+    image = tf_image.apply_affine_transform(image, zx=zx, zy=zy, fill_mode='nearest')
+    label = tf_image.apply_affine_transform(label, zx=zx, zy=zy, fill_mode='nearest')
+
     return image, label
 
 
@@ -170,7 +128,8 @@ def random_brightness(image, label, brightness_range):
             raise ValueError('`brightness_range` should be '
                              'a tuple or list of two floats. '
                              'Received: %s' % (brightness_range,))
-        image = keras_image.apply_brightness_shift(image, brightness)
+        image = tf_image.apply_brightness_shift(image, brightness)
+    
     return image, label
 
 
@@ -178,6 +137,7 @@ def random_horizontal_flip(image, label, h_flip):
     if h_flip:
         image = cv2.flip(image, 1)
         label = cv2.flip(label, 1)
+    
     return image, label
 
 
@@ -185,6 +145,7 @@ def random_vertical_flip(image, label, v_flip):
     if v_flip:
         image = cv2.flip(image, 0)
         label = cv2.flip(label, 0)
+    
     return image, label
 
 
@@ -196,8 +157,9 @@ def random_rotation(image, label, rotation_range):
     if rotation_range > 0.:
         theta = np.random.uniform(-rotation_range, rotation_range)
         # rotate it!
-        image = keras_image.apply_affine_transform(image, theta=theta, fill_mode='nearest')
-        label = keras_image.apply_affine_transform(label, theta=theta, fill_mode='nearest')
+        image = tf_image.apply_affine_transform(image, theta=theta, fill_mode='nearest')
+        label = tf_image.apply_affine_transform(label, theta=theta, fill_mode='nearest')
+    
     return image, label
 
 
@@ -208,8 +170,20 @@ def random_channel_shift(image, label, channel_shift_range):
 
     if channel_shift_range > 0:
         channel_shift_intensity = np.random.uniform(-channel_shift_range, channel_shift_range)
-        image = keras_image.apply_channel_shift(image, channel_shift_intensity, channel_axis=2)
+        image = tf_image.apply_channel_shift(image, channel_shift_intensity, channel_axis=2)
+    
     return image, label
+
+
+def do_augmentation(img, flip=0, mask=False):
+    if mask is False:
+        img = tf.image.random_brightness(img, max_delta=0.5)
+        img = tf.image.random_saturation(img, lower=0.5, upper=1.5)
+        img = tf.image.random_hue(img, max_delta=0.2)
+        img = tf.image.random_contrast(img, lower=0.5, upper=1.5)
+    img = tf.case([(tf.greater(flip, 0), lambda: tf.image.flip_left_right(img))], default=lambda: img)
+
+    return img
 
 
 def one_hot_encode_gray(label, num_classes):
@@ -222,6 +196,7 @@ def one_hot_encode_gray(label, num_classes):
     heat_map = np.ones(shape=label.shape[0:2] + (num_classes,))
     for i in range(num_classes):
         heat_map[:, :, i] = np.equal(label, i).astype('float32')
+    
     return heat_map
 
 
@@ -237,18 +212,59 @@ def one_hot_encode_gray_op(label, num_classes):
         heat_map.append(tf.equal(label, i))
     heat_map = tf.stack(heat_map, axis=-1)
     heat_map = tf.cast(heat_map, dtype=tf.float32)
+
     return heat_map
 
 
-def one_hot_encode_label_op(image, palette):
+def label_segmentation_mask(seg, class_labels):
+    """
+    Given a 3D (W, H, depth=3) segmentation mask, prepare a 2D labeled segmentation mask
+
+    # Arguments
+        seg: The segmentation mask where each cell of depth provides the r, g, and b values
+        class_labels
+
+    # Returns
+        Labeled segmentation mask where each cell provides its label value
+    """
+    seg = seg.astype("uint8")
+
+    # returns a 2D matrix of size W x H of the segmentation mask
+    label = np.zeros(seg.shape[:2], dtype=np.uint8)
+
+    for i, rgb in enumerate(class_labels):
+        label[(seg == rgb).all(axis=2)] = i
+
+    return label
+
+
+def one_hot_encode(seg, class_labels):
+    """
+    Convert a segmentation mask label array to one-hot format
+    by replacing each pixel value with a vector of length num_classes
+
+    # Arguments
+        seg: The 3D array segmentation mask
+        class_labels
+
+    # Returns
+        A 3D array with the same width and height as the input, but
+        with a depth size of num_classes
+    """
+    num_classes = len(class_labels)  # seg dim = H*W*3
+    label = label_segmentation_mask(seg, class_labels)  # label dim = H*W
+    one_hot = utils.to_categorical(label, num_classes)  # one_hot dim = H*W*N
+
+    return one_hot
+
+
+def one_hot_encode_op(mask, class_colors):
     one_hot_map = []
 
-    for class_colors in palette:
-        class_colors = [np.array(class_colors)]
-        class_map = tf.zeros(image.shape[0:2], dtype=tf.int32)
-        for color in class_colors:
-            # find instances of color and append layer to one-hot-map
-            class_map = tf.bitwise.bitwise_or(class_map, tf.cast(tf.reduce_all(tf.equal(image, color), axis=-1), tf.int32))
+    for color in class_colors:
+        class_map = tf.zeros(mask.shape[0:2], dtype=tf.int32)
+        # find instances of color and append layer to one-hot-map
+        class_map = tf.bitwise.bitwise_or(class_map, tf.cast(tf.reduce_all(tf.equal(mask, color), axis=-1), tf.int32))
         one_hot_map.append(class_map)
 
     # finalize one-hot-map
@@ -258,92 +274,83 @@ def one_hot_encode_label_op(image, palette):
     return one_hot_map
 
 
+# def one_hot_encode_op(image, palette):
+#     one_hot_map = []
+#     for class_colors in palette:
+#         class_colors = [np.array(class_colors)]
+#         class_map = tf.zeros(image.shape[0:2], dtype=tf.int32)
+#         for color in class_colors:
+#             # find instances of color and append layer to one-hot-map
+#             class_map = tf.bitwise.bitwise_or(class_map, tf.cast(tf.reduce_all(tf.equal(image, color), axis=-1), tf.int32))
+#         one_hot_map.append(class_map)
+#     # finalize one-hot-map
+#     one_hot_map = tf.stack(one_hot_map, axis=-1)
+#     one_hot_map = tf.cast(one_hot_map, tf.float32)
+#     return one_hot_map
+
+
 def decode_one_hot(one_hot_map):
     return np.argmax(one_hot_map, axis=-1)
 
 
-def parse_convert_xml(conversion_file_path):
-    defRoot = xmlET.parse(conversion_file_path).getroot()
+def reverse_one_hot(image):
+    """
+    Transform a 2D array in one-hot format (depth is num_classes),
+    to a 2D array with only 1 channel, where each pixel value is
+    the classified class key.
 
-    one_hot_palette = []
-    class_list = []
-    for idx, defElement in enumerate(defRoot.findall("SLabel")):
-        from_color = np.fromstring(defElement.get("fromColour"), dtype=int, sep=" ")
-        to_class = np.fromstring(defElement.get("toValue"), dtype=int, sep=" ")
-        if to_class in class_list:
-             one_hot_palette[class_list.index(to_class)].append(from_color)
-        else:
-            one_hot_palette.append([from_color])
-            class_list.append(to_class)
+    # Arguments
+        image: The one-hot format image
 
-    return one_hot_palette
+    # Returns
+        A 2D array with the same width and height as the input, but
+        with a depth size of 1, where each pixel value is the classified
+        class key.
+    """
+    w = image.shape[0]
+    h = image.shape[1]
+    x = np.zeros([w, h, 1])
 
+    for i in range(0, w):
+        for j in range(0, h):
+            index, value = max(enumerate(image[i, j, :]), key=operator.itemgetter(1))
+            x[i, j] = index
 
-def parse_convert_py(conversion_file_path):
-    module_name = os.path.splitext(os.path.basename(conversion_file_path))[0]
-    module_path = os.path.abspath(os.path.expanduser(conversion_file_path))
-    module_dir = os.path.dirname(module_path)
-    sys.path.append(module_dir)
-    module = importlib.import_module(module_name, package=module_path)
+    x = np.argmax(image, axis=-1)
 
-    labels = module.labels
-    one_hot_palette_label_values = [list(labels[k].color) for k in range(len(labels)) if labels[k].trainId >= 0 and labels[k].trainId < 255]
-    one_hot_palette_label_names = [labels[k].name for k in range(len(labels)) if labels[k].trainId >= 0 and labels[k].trainId < 255]
-
-    print("Number of classes - ", len(one_hot_palette_label_values))
-    for name, color in zip(one_hot_palette_label_names, one_hot_palette_label_values):
-        print(f"{name} - {color}")
-
-    return one_hot_palette_label_names, one_hot_palette_label_values
+    return x
 
 
-# adamw utils
-def get_weight_decays(model, verbose=1):
-    wd_dict = {}
-    for layer in model.layers:
-        layer_l2regs = _get_layer_l2regs(layer)
-        if layer_l2regs:
-            for layer_l2 in layer_l2regs:
-                weight_name, weight_l2 = layer_l2
-                wd_dict.update({weight_name: weight_l2})
-                if weight_l2 != 0 and verbose:
-                    print(("WARNING: {} l2-regularization = {} - should be "
-                           "set 0 before compiling model").format(
-                        weight_name, weight_l2))
-    return wd_dict
+def make_prediction(model, img=None, img_path=None, shape=None):
+    """
+    Predict the hot encoded categorical label from the image.
+    Later, convert it numerical label.
+    """
+    if img is not None:  # dim = H*W*3
+        img = np.expand_dims(img, axis=0)  # dim = 1*H*W*3
+    if img_path is not None:
+        img = tf_image.img_to_array(tf_image.load_img(img_path, target_size=shape)) / 255.
+        img = np.expand_dims(img, axis=0)  # dim = 1*H*W*3
+    label = model.predict(img)  # dim = 1*H*W*N
+    label = np.argmax(label[0], axis=2)  # dim = H*W
+
+    return label
 
 
-def fill_dict_in_order(_dict, _list_of_vals):
-    for idx, key in enumerate(_dict.keys()):
-        _dict[key] = _list_of_vals[idx]
-    return _dict
+def form_color_mask(label, mapping):
+    """
+    Generate the color mask from the numerical label
+    """
+    h, w = label.shape  # dim = H*W
+    mask = np.zeros((h, w, 3), dtype=np.uint8)  # dim = H*W*3
+    mask = mapping[label]
+    mask = mask.astype(np.uint8)
+
+    return mask
 
 
-def _get_layer_l2regs(layer):
-    if hasattr(layer, 'layer') or hasattr(layer, 'cell'):
-        return _rnn_l2regs(layer)
-    else:
-        l2_lambda_kb = []
-        for weight_name in ['kernel', 'bias']:
-            _lambda = getattr(layer, weight_name + '_regularizer', None)
-            if _lambda is not None:
-                l2_lambda_kb.append([getattr(layer, weight_name).name,
-                                     float(_lambda.l2)])
-        return l2_lambda_kb
+def color_encode(image, color_values):
+    color_codes = np.array(color_values)
+    x = color_codes[image.astype(int)]
 
-
-def _rnn_l2regs(layer):
-    _layer = layer.layer if 'backward_layer' in layer.__dict__ else layer
-    cell = _layer.cell
-
-    l2_lambda_krb = []
-    if hasattr(cell, 'kernel_regularizer') or \
-            hasattr(cell, 'recurrent_regularizer') or hasattr(cell, 'bias_regularizer'):
-        for weight_name in ['kernel', 'recurrent', 'bias']:
-            _lambda = getattr(cell, weight_name + '_regularizer', None)
-            if _lambda is not None:
-                weight_name = weight_name if 'recurrent' not in weight_name \
-                    else 'recurrent_kernel'
-                l2_lambda_krb.append([getattr(cell, weight_name).name,
-                                      float(_lambda.l2)])
-    return l2_lambda_krb
+    return x
