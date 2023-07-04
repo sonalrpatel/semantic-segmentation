@@ -15,6 +15,7 @@ from utils.loss_function import *
 from utils.losses import *
 from utils.loss_segmentation import IoULoss, DiceLoss, TverskyLoss, FocalTverskyLoss, HybridLoss, FocalHybridLoss
 from utils.helpers import *
+from utils.data_generator import DatasetGenerator
 from utils import utils
 from builders import model_builder
 from models.models_segmentation import Unet, Residual_Unet, Attention_Unet, Unet_plus, DeepLabV3plus
@@ -110,12 +111,12 @@ def train(*args):
                 conf.loss = args[1]
 
     # determine absolute filepaths
-    conf.input_training   = utils.abspath(conf.input_training)
-    conf.label_training   = utils.abspath(conf.label_training)
-    conf.input_validation = utils.abspath(conf.input_validation)
-    conf.label_validation = utils.abspath(conf.label_validation)
-    conf.model_weights    = utils.abspath(conf.model_weights) if conf.model_weights is not None else conf.model_weights
-    conf.output_dir       = utils.abspath(conf.output_dir)
+    conf.input_training   = abspath(conf.input_training)
+    conf.label_training   = abspath(conf.label_training)
+    conf.input_validation = abspath(conf.input_validation)
+    conf.label_validation = abspath(conf.label_validation)
+    conf.model_weights    = abspath(conf.model_weights) if conf.model_weights is not None else conf.model_weights
+    conf.output_dir       = abspath(conf.output_dir)
 
     # check related paths
     paths = check_related_path(conf.output_dir)
@@ -125,18 +126,26 @@ def train(*args):
     assert conf.num_classes == len(class_names)
 
     # build training data pipeline
-    dataTrain, len_train, org_shape = dataset_from_path((conf.input_training, conf.label_training), conf.max_samples_training)
-    dataTrain = preprocess_dataset(dataTrain, org_shape, conf.augment)
-    dataTrain = configure_dataset(dataTrain)
-    n_batches_train = dataTrain.cardinality().numpy() // conf.epochs
-    print("Built data pipeline for {} training samples with {} batches per epoch".format(len_train, n_batches_train))
+    dataTrain, len_train, nbatch_train = DatasetGenerator(data_path=(conf.input_training, conf.label_training),
+                                                          max_samples=conf.max_samples_training,
+                                                          image_shape=conf.image_shape,
+                                                          augment=conf.augment,
+                                                          class_colors=class_colors,
+                                                          shuffle=conf.shuffle,
+                                                          batch_size=conf.batch_size,
+                                                          epochs=conf.epochs)()
+    print("Built data pipeline for {} training samples with {} batches per epoch".format(len_train, nbatch_train))
 
     # build validation data pipeline
-    dataValid, len_valid, org_shape = dataset_from_path((conf.input_validation, conf.label_validation), conf.max_samples_validation)
-    dataValid = preprocess_dataset(dataValid, org_shape)
-    dataValid = configure_dataset(dataValid)
-    n_batches_valid = dataValid.cardinality().numpy() // conf.epochs
-    print("Built data pipeline for {} validation samples with {} batches per epoch".format(len_valid, n_batches_valid))
+    dataValid, len_valid, nbatch_valid = DatasetGenerator(data_path=(conf.input_validation, conf.label_validation),
+                                                          max_samples=conf.max_samples_validation,
+                                                          image_shape=conf.image_shape,
+                                                          augment=conf.augment,
+                                                          class_colors=class_colors,
+                                                          shuffle=conf.shuffle,
+                                                          batch_size=conf.batch_size,
+                                                          epochs=conf.epochs)()
+    print("Built data pipeline for {} validation samples with {} batches per epoch".format(len_valid, nbatch_valid))
 
 
     # build the model

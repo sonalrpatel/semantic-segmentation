@@ -6,14 +6,14 @@ The implementation of Data Generator based on Tensorflow.
 @Project: https://github.com/luyanger1799/amazing-semantic-segmentation
 
 """
+from typing import Any
 import numpy as np
 import tensorflow as tf
-from tensorflow.python.keras.preprocessing.image import Iterator
-from keras_applications import imagenet_utils
 from utils.helpers import *
 from utils.utils import *
 
-keras_utils = tf.keras.utils
+imagenet_utils = tf.keras.applications.imagenet_utils
+Iterator = tf.keras.preprocessing.image.Iterator
 
 
 class DataIterator(Iterator):
@@ -135,18 +135,18 @@ class DatasetGenerator(object):
         assert max_samples != 0
         assert len(data_path) == 2
         assert len(image_shape) == 2
-        
+
         image_path, label_path = data_path
-        
+
         self.image_path = image_path
         self.label_path = label_path
         self.max_samples = max_samples
         self.image_shape = image_shape
-        self.augment = augment
         self.class_colors = class_colors
+        self.augment = augment
         self.shuffle = shuffle
-        self.batch_size = batch_size
         self.epochs = epochs
+        self.batch_size = batch_size
 
     # read files from data path
     def dataset_from_path(self):
@@ -194,4 +194,13 @@ class DatasetGenerator(object):
         dataset = dataset.batch(self.batch_size, drop_remainder=True, num_parallel_calls=tf.data.experimental.AUTOTUNE)
         dataset = dataset.repeat(self.epochs)
         dataset = dataset.prefetch(tf.data.experimental.AUTOTUNE)
+        
         return dataset
+    
+    def __call__(self, *args: Any, **kwds: Any) -> Any:
+        dataset, len_dataset, org_shape = self.dataset_from_path()
+        dataset = self.preprocess_dataset(dataset, org_shape)
+        dataset = self.configure_dataset(dataset)
+        
+        nbatch_dataset = dataset.cardinality().numpy() // self.epochs
+        return dataset, len_dataset, nbatch_dataset
