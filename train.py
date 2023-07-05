@@ -75,8 +75,7 @@ parser.add("-rs",   "--random_seed",                type=int,       default=None
 parser.add("-esp",  "--early_stopping_patience",    type=int,       default=10,                 help="patience for early-stopping due to converged validation mIoU")
 parser.add("-lr",   "--learning_rate",              type=float,     default=3e-4,               help="the initial learning rate")
 parser.add("-lrw",  "--lr_warmup",                  type=str2bool,  default=False,              help="whether to use lr warm up")
-parser.add("-lrs",  "--lr_scheduler",               type=str,       default="cosine_decay",     help="strategy to schedule learning rate",
-                    choices=["step_decay", "poly_decay", "cosine_decay"])
+parser.add("-lrs",  "--lr_scheduler",               type=str,       default="polynomial_decay", help="strategy to schedule learning rate")
 parser.add("-ls",   "--loss",                       type=str,       default=None,               help="loss function for training")
 parser.add("-op",   "--optimizer",                  type=str,       default="adam",             help="the optimizer for training")
 parser.add("-od",   "--output_dir",                 type=str,       required=True,              help="output directory for TensorBoard and models")
@@ -186,28 +185,24 @@ def train(*args):
         'dice_loss_'            : LossFunc(conf.num_classes).dice_loss,
         'ce_iou_loss'           : LossFunc(conf.num_classes).CEIoU_loss,
         'ce_dice_loss'          : LossFunc(conf.num_classes).CEDice_loss
-    }
+        }
 
     loss = losses[conf.loss] if conf.loss is not None else categorical_crossentropy_with_logits
 
     ## chose optimizer ##
-    OPTIMIZER_NAME = conf.optimizer
-    WEIGHT_DECAY = 0.00005
-    MOMENTUM = 0.9
-    START_LR = 0.001
-    END_LR = 0.0001
-    LR_DECAY_EPOCHS = 10
-    POWER = 2
+    # lr schedule
+    if conf.lr_warmup and conf.epochs - 5 <= 0:
+        raise ValueError('epochs must be larger than 5 if lr warm up is used.')
 
-    lr_schedule = tf.keras.optimizers.schedules.PolynomialDecay(
-        initial_learning_rate=START_LR,
-        decay_steps=LR_DECAY_EPOCHS*nbatch_train,
-        end_learning_rate=END_LR,
-        power=POWER,
-        cycle=False,
-        name=None
-    )
+    lr_decays = {
+        'step_decay'       : step_decay(conf.learning_rate, conf.epochs, warmup=conf.lr_warmup),
+        'poly_decay'       : poly_decay(conf.learning_rate, conf.epochs, warmup=conf.lr_warmup),
+        'cosine_decay'     : cosine_decay(conf.learning_rate, conf.epochs, warmup=conf.lr_warmup),
+        'polynomial_decay' : polynomial_decay(nbatch_train)
+        }
+    lr_decay = lr_decays[conf.lr_scheduler]
 
+    # optimizer
     optimizers = {
         'adam'      : Adam(learning_rate=conf.learning_rate),
         'nadam'     : Nadam(learning_rate=conf.learning_rate),
@@ -215,13 +210,12 @@ def train(*args):
         'adamw'     : AdamW(learning_rate=conf.learning_rate, weight_decay=0.00005),
         'sgdw'      : SGDW(learning_rate=conf.learning_rate, momentum=0.99, weight_decay=0.00005),
 
-        'Adam'      : Adam(lr_schedule),
-        'Adadelta'  : Adadelta(lr_schedule),
-        'AdamW'     : AdamW(learning_rate=lr_schedule, weight_decay=WEIGHT_DECAY),
-        'AdaBelief' : AdaBelief(learning_rate=lr_schedule),
-        'SGDW'      : SGDW(learning_rate=lr_schedule, weight_decay=WEIGHT_DECAY, momentum=MOMENTUM)
-    }
-
+        'Adam'      : Adam(lr_decay),
+        'Adadelta'  : Adadelta(lr_decay),
+        'AdamW'     : AdamW(learning_rate=lr_decay, weight_decay=0.00005),
+        'AdaBelief' : AdaBelief(learning_rate=lr_decay),
+        'SGDW'      : SGDW(learning_rate=lr_decay, weight_decay=0.00005, momentum=0.9)
+        }
     optimizer = optimizers[conf.optimizer]
 
     ## metrics ##
@@ -231,7 +225,7 @@ def train(*args):
     model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
     print("Compiled model *{}_based_on_{}*".format(conf.model, conf.base_model))
 
-    ## callbacks setting ##
+    ## callback setting ##
     # training and validation steps
     steps_per_epoch     = int(nbatch_train)
     validation_steps    = int(nbatch_valid)
@@ -250,19 +244,10 @@ def train(*args):
     best_checkpoint_cb  = ModelCheckpoint(os.path.join(paths['weights_path'], "weights1.hdf5"),
                                             save_best_only=True, monitor="val_mean_io_u", mode="max", save_weights_only=False)
     early_stopping_cb   = EarlyStopping(monitor="val_mean_io_u", mode="max", patience=conf.early_stopping_patience, verbose=1)
+    lr_scheduler_cb     = LearningRateScheduler(lr_decay, conf.learning_rate, conf.lr_warmup, steps_per_epoch, verbose=1)
     lr_cb               = CustomCallback()
 
-    # lr schedule strategy
-    if conf.lr_warmup and conf.epochs - 5 <= 0:
-        raise ValueError('epochs must be larger than 5 if lr warm up is used.')
-
-    lr_decays = {'step_decay': step_decay(conf.learning_rate, conf.epochs, warmup=conf.lr_warmup),
-                 'poly_decay': poly_decay(conf.learning_rate, conf.epochs, warmup=conf.lr_warmup),
-                 'cosine_decay': cosine_decay(conf.learning_rate, conf.epochs, warmup=conf.lr_warmup)}
-    lr_decay = lr_decays[conf.lr_scheduler]
-    lr_scheduler_cb     = LearningRateScheduler(lr_decay, conf.learning_rate, conf.lr_warmup, steps_per_epoch, verbose=1)
-
-    # callbacks
+    # callbacks list
     # callbacks = [tensorboard_cb, csvlogger_cb, checkpoint_cb, best_checkpoint_cb, lr_scheduler_cb, early_stopping_cb, lr_cb]
     callbacks = [tensorboard_cb, csvlogger_cb, checkpoint_cb, best_checkpoint_cb, early_stopping_cb, lr_cb]
 
