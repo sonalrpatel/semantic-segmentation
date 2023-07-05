@@ -15,10 +15,11 @@ backend = tf.keras.backend
 
 
 class RefineNet(Network):
-    def __init__(self, num_classes, input_size=None, version='RefineNet', base_model='ResNet50', **kwargs):
+    def __init__(self, input_shape: tuple, num_classes: int, version='RefineNet', base_model='ResNet50', **kwargs):
         """
         The initialization of RefineNet.
-        :param num_classes: the number of predicted classes.
+        :param input_shape: the size of input image        
+        :param num_classes: the number of predicted classes
         :param version: 'RefineNet'
         :param base_model: the backbone model
         :param kwargs: other parameters
@@ -35,10 +36,10 @@ class RefineNet(Network):
                               'MobileNetV2']
         
         super(RefineNet, self).__init__(num_classes, version, base_model, **kwargs)
-        self.input_size = input_size
+        self.input_shape = input_shape
 
     def __call__(self, **kwargs):
-        inputs = layers.Input(shape=self.input_size + (3,))
+        inputs = layers.Input(shape=self.input_shape + (3,))
         return self._refinenet(inputs)
 
     def _residual_conv_unit(self, inputs, features=256, kernel_size=3):

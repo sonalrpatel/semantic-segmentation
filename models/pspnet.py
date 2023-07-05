@@ -16,10 +16,11 @@ backend = tf.keras.backend
 
 
 class PSPNet(Network):
-    def __init__(self, num_classes, input_size=None, version='PSPNet', base_model='ResNet50', **kwargs):
+    def __init__(self, input_shape: tuple, num_classes: int, version='PSPNet', base_model='ResNet50', **kwargs):
         """
         The initialization of PSPNet.
-        :param num_classes: the number of predicted classes.
+        :param input_shape: the size of input image        
+        :param num_classes: the number of predicted classes
         :param version: 'PSPNet'
         :param base_model: the backbone model
         :param kwargs: other parameters
@@ -42,10 +43,10 @@ class PSPNet(Network):
                               'Xception-DeepLab']
         
         super(PSPNet, self).__init__(num_classes, version, base_model, dilation, **kwargs)
-        self.input_size = input_size
+        self.input_shape = input_shape
 
     def __call__(self, **kwargs):
-        inputs = layers.Input(shape=self.input_size + (3,))
+        inputs = layers.Input(shape=self.input_shape + (3,))
         return self._pspnet(inputs)
 
     def _pspnet(self, inputs):

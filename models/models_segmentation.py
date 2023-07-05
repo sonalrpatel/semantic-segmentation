@@ -9,17 +9,17 @@ from keras.layers import Conv2D, Conv2DTranspose, Concatenate, Dense, SeparableC
 from keras.layers import Dropout, SpatialDropout2D
 from keras.layers import MaxPooling2D, UpSampling2D
 from keras.layers import BatchNormalization, Activation
-from keras.applications.resnet import ResNet50,ResNet101,ResNet152
-from keras.applications.resnet_v2 import ResNet50V2,ResNet101V2,ResNet152V2
+from keras.applications.resnet import ResNet50, ResNet101, ResNet152
+from keras.applications.resnet_v2 import ResNet50V2, ResNet101V2, ResNet152V2
 from keras.applications.mobilenet import MobileNet
 from keras.applications.mobilenet_v2 import MobileNetV2
 from keras.applications.mobilenet_v3 import MobileNetV3Small, MobileNetV3Large
 from keras.applications.regnet import RegNetX002, RegNetX004, RegNetX006, RegNetX008
-from keras.applications.regnet import RegNetX016,RegNetX032, RegNetX040, RegNetX064
-from keras.applications.regnet import RegNetX080,RegNetX120,RegNetX160,RegNetX320
+from keras.applications.regnet import RegNetX016, RegNetX032, RegNetX040, RegNetX064
+from keras.applications.regnet import RegNetX080, RegNetX120, RegNetX160, RegNetX320
 from keras.applications.regnet import RegNetY002, RegNetY004, RegNetY006, RegNetY008
-from keras.applications.regnet import RegNetY016,RegNetY032, RegNetY040, RegNetY064
-from keras.applications.regnet import RegNetY080,RegNetY120,RegNetY160,RegNetY320
+from keras.applications.regnet import RegNetY016, RegNetY032, RegNetY040, RegNetY064
+from keras.applications.regnet import RegNetY080, RegNetY120, RegNetY160, RegNetY320
 from keras.applications.efficientnet import EfficientNetB0, EfficientNetB1, EfficientNetB2
 from keras.applications.efficientnet import EfficientNetB3, EfficientNetB4, EfficientNetB5
 from keras.applications.efficientnet import EfficientNetB6, EfficientNetB7
@@ -31,7 +31,13 @@ kernel_seed = random.randint(0, 1000)
 KERNEL_INITIALIZER = HeNormal(kernel_seed)
 
 
-def get_backbone(backbone_name: str, input_tensor: Tensor, freeze_backbone: bool, unfreeze_at: str, output_stride: int = None, depth: int = None) -> Model:    
+def get_backbone(backbone_name: str,
+                 input_tensor: Tensor,
+                 freeze_backbone: bool,
+                 unfreeze_at: str,
+                 output_stride: int = None,
+                 depth: int = None
+                 ) -> Model:
     backbone_layers = {
         'ResNet50': ('conv1_relu', 'conv2_block3_out', 'conv3_block4_out', 'conv4_block6_out', 'conv5_block3_out'),
         'ResNet101': ('conv1_relu', 'conv2_block3_out', 'conv3_block4_out', 'conv4_block23_out', 'conv5_block3_out'),
@@ -130,7 +136,10 @@ def get_backbone(backbone_name: str, input_tensor: Tensor, freeze_backbone: bool
     return backbone
 
 
-def dropout_layer(input_tensor: Tensor, dropout_type: str, dropout_rate: float) -> Tensor:
+def dropout_layer(input_tensor: Tensor, 
+                  dropout_type: str,
+                  dropout_rate: float
+                  ) -> Tensor:
     if dropout_type==None or dropout_rate==0. :
         return input_tensor
     elif dropout_type=='normal':
@@ -147,8 +156,8 @@ def conv_block(input_tensor: Tensor,
                dropout_rate: float,
                dropout_type: str,
                activation: str,
-               unet_type: str) -> Tensor:
-    
+               unet_type: str
+               ) -> Tensor:
     residual = Conv2D(filters, kernel_size=1, padding='same', kernel_initializer=KERNEL_INITIALIZER)(input_tensor)
     
     x = Conv2D(filters, kernel_size=3, padding='same', kernel_initializer=KERNEL_INITIALIZER)(input_tensor)
@@ -158,7 +167,7 @@ def conv_block(input_tensor: Tensor,
     x = Conv2D(filters, kernel_size=3, padding='same', kernel_initializer=KERNEL_INITIALIZER)(x)
     x = BatchNormalization()(x)
     
-    if unet_type == 'residual' or unet_type=='attention':
+    if unet_type == 'residual' or unet_type == 'attention':
         x = Add()([x, residual])
     
     x = Activation(activation)(x)
@@ -172,7 +181,7 @@ def downsampling_block(input_tensor: Tensor,
                        dropout_rate: float,
                        dropout_type: str,
                        activation: str,
-                       unet_type:str
+                       unet_type: str
                        ) -> tuple:
     
     x = conv_block(input_tensor, filters, dropout_rate, dropout_type, activation, unet_type)  
@@ -183,7 +192,9 @@ def downsampling_block(input_tensor: Tensor,
     return downsampled_x, skip_connection
 
 
-def visual_attention_block(encoder_input: Tensor, decoder_input: Tensor) -> Tensor:
+def visual_attention_block(encoder_input: Tensor, 
+                           decoder_input: Tensor
+                           ) -> Tensor:
     
     input_shape = K.int_shape(encoder_input)
     num_nodes = input_shape[-1] #channels last
@@ -214,7 +225,7 @@ def upsample_and_concat(input_tensor: Tensor,
                         dropout_type: str,
                         activation: str,
                         unet_type: str
-                        )-> Tensor :
+                        ) -> Tensor:
     """
     Upsampling block for Unet architecture. Takes as inputs an input tensor which is upsampled with the Transpose Convolution
     operation, and a skip connection tensor which is concatenated with the upsampled tensor. If skip connection is None it
@@ -238,7 +249,13 @@ def upsample_and_concat(input_tensor: Tensor,
     return x
 
 
-def ASPP(input_tensor: Tensor, filters: int, activation: str, dilation_rates, dropout_type, dropout_rate):
+def ASPP(input_tensor: Tensor, 
+         filters: int, 
+         activation: str, 
+         dilation_rates, 
+         dropout_type, 
+         dropout_rate
+         ) -> Tensor:
     x1 = Conv2D(filters, kernel_size=1, dilation_rate=1, padding='same', 
                 kernel_initializer=KERNEL_INITIALIZER, use_bias=False,
                 name='ASPP_Conv1')(input_tensor)
@@ -267,12 +284,12 @@ def ASPP(input_tensor: Tensor, filters: int, activation: str, dilation_rates, dr
     x4 = Activation(activation)(x4)
     x4 = dropout_layer(x4, dropout_type, dropout_rate)
     
-#     pooling_size = input_shape
-#     image_feature = AveragePooling2D(pooling_size, strides=1, padding='same')(inputs)
-#     image_feature = Conv2D(dim, (1, 1), padding='same', use_bias=False)(image_feature)
-#     image_feature = BatchNormalization()(image_feature)
-#     image_feature = Activation('relu')(image_feature)
-#     image_feature = Lambda(lambda x: tf.image.resize(x, input_shape))(image_feature)
+    # pooling_size = input_shape
+    # image_feature = AveragePooling2D(pooling_size, strides=1, padding='same')(inputs)
+    # image_feature = Conv2D(dim, (1, 1), padding='same', use_bias=False)(image_feature)
+    # image_feature = BatchNormalization()(image_feature)
+    # image_feature = Activation('relu')(image_feature)
+    # image_feature = Lambda(lambda x: tf.image.resize(x, input_shape))(image_feature)
 
     x = Concatenate()([x1,x2,x3,x4])
     
@@ -285,7 +302,10 @@ def ASPP(input_tensor: Tensor, filters: int, activation: str, dilation_rates, dr
     return x
 
 
-def segmentation_head(input_shape:Tensor, num_classes:int, output_activation='softmax'):
+def segmentation_head(input_shape: Tensor,
+                      num_classes: int,
+                      output_activation = 'softmax'
+                      ) -> Model:
     input_tensor = tf.keras.Input(shape=input_shape)
     output = Conv2D(num_classes, kernel_size=1, kernel_initializer=KERNEL_INITIALIZER, name='Output_Conv')(input_tensor)
     output = Activation(output_activation, name='Output_Activation', dtype='float32')(output)
@@ -303,8 +323,7 @@ def DeepLabV3plus(input_shape: tuple,
                   freeze_backbone = True,
                   unfreeze_at = None,
                   weights: str = None
-                  ):
-    
+                  ) -> Model:
     """
     Instantiate a DeepLabV3+ model.
 
@@ -347,7 +366,6 @@ def DeepLabV3plus(input_shape: tuple,
     
     first_upsampling_factor = int(output_stride / 4)
     aspp_dilation_rates = dilation_rates[output_stride]
-    
     
     input_tensor = tf.keras.Input(shape=input_shape)
     
@@ -421,8 +439,7 @@ def base_Unet(unet_type: str,
               freeze_backbone : bool,
               unfreeze_at : str,
               output_stride : int = None
-              ):
-
+              ) -> Model:
     if output_stride is None:
         output_stride = 32
         
@@ -442,7 +459,6 @@ def base_Unet(unet_type: str,
     else:
         dropout_type = [dropout_type] * depth
 
-    # ---------------------------------------------------------------------------------------------------------------------------
     input_tensor = tf.keras.Input(shape=input_shape)
     
     if backbone_name is None:
@@ -467,11 +483,11 @@ def base_Unet(unet_type: str,
         
         # Pre-trained Backbone as Encoder
         backbone = get_backbone(backbone_name=backbone_name,
-                            output_stride=output_stride,
-                            input_tensor=input_tensor,
-                            freeze_backbone=freeze_backbone,
-                            unfreeze_at=unfreeze_at,
-                            depth=depth)
+                                output_stride=output_stride,
+                                input_tensor=input_tensor,
+                                freeze_backbone=freeze_backbone,
+                                unfreeze_at=unfreeze_at,
+                                depth=depth)
         Skip = backbone(input_tensor, training=False)
         
         # Bottleneck
@@ -505,8 +521,7 @@ def Unet(input_shape: tuple,
          freeze_backbone = True,
          unfreeze_at = None,
          output_stride = None
-         ):
-    
+         ) -> Model:
     """
     Instantiate a U-net model.
 
@@ -564,8 +579,7 @@ def Residual_Unet(input_shape: tuple,
                   freeze_backbone = True,
                   unfreeze_at = None,
                   output_stride = None
-                  ):
-    
+                  ) -> Model:
     """
     Instantiate a U-net model with a modified basic basic block with residual connections to improve network learning capacity.
 
@@ -625,7 +639,7 @@ def Attention_Unet(input_shape: tuple,
                    freeze_backbone = True,
                    unfreeze_at = None,
                    output_stride = None
-                   ):
+                   ) -> Model:
     """
     Instantiate a U-net model that uses attention modules in each decoder block to improve segmentation results by weighing 
     with a modified basic basic block with residual connections to improve network learning capacity.
@@ -660,20 +674,20 @@ def Attention_Unet(input_shape: tuple,
         - [CBAM: Convolutional Block Attention Module](https://arxiv.org/abs/1807.06521)
     """
     
-    return  base_Unet('attention', 
-                      input_shape=input_shape, 
-                      filters=input_shape, 
-                      num_classes=num_classes, 
-                      activation=activation,
-                      dropout_rate=activation,
-                      dropout_type=dropout_type, 
-                      scale_dropout=scale_dropout,
-                      dropout_offset=scale_dropout,
-                      backbone_name=backbone_name,
-                      freeze_backbone=freeze_backbone,
-                      unfreeze_at=unfreeze_at,
-                      output_stride = output_stride,
-                      )
+    return base_Unet('attention',
+                     input_shape=input_shape,
+                     filters=input_shape,
+                     num_classes=num_classes,
+                     activation=activation,
+                     dropout_rate=activation,
+                     dropout_type=dropout_type,
+                     scale_dropout=scale_dropout,
+                     dropout_offset=scale_dropout,
+                     backbone_name=backbone_name,
+                     freeze_backbone=freeze_backbone,
+                     unfreeze_at=unfreeze_at,
+                     output_stride = output_stride
+                     )
 
 
 def Unet_plus(input_shape: tuple,
@@ -688,8 +702,7 @@ def Unet_plus(input_shape: tuple,
               deep_supervision: bool = False,
               attention: bool = False,
               output_stride = None,
-              ):
-    
+              ) -> Model:
     """
     Instantiate a U-net++ model.
 
@@ -725,7 +738,6 @@ def Unet_plus(input_shape: tuple,
         unet_type = 'attention'
     else:
         unet_type = 'normal'
-        
     
     input_tensor = tf.keras.Input(shape=input_shape)
 
@@ -751,7 +763,6 @@ def Unet_plus(input_shape: tuple,
         
         Skip.insert(0, None)
         skip0_0, skip1_0, skip2_0, skip3_0, skip4_0, skip5_0 = Skip
-        # skip0_0 is None
         
     x0_1 = upsample_and_concat(skip1_0, skip0_0, filters[0], dropout_rate, dropout_type, activation, unet_type)
     x1_1 = upsample_and_concat(skip2_0, skip1_0, filters[1], dropout_rate, dropout_type, activation, unet_type)
@@ -803,7 +814,7 @@ def Unet_plus(input_shape: tuple,
                                                   output_2,
                                                   output_3,
                                                   output_4,
-                                                  output_5] , name='Unet_pp')
+                                                  output_5], name='Unet_pp')
     
     if deep_supervision:
         model = Unet_pp
@@ -817,7 +828,7 @@ class Unet_pp():
     def __init__(self, deep_supervision: bool = False) -> None:
         self.deep_supervision = deep_supervision
     
-    
+
     def build(self,
               input_shape: tuple,
               filters: tuple, 
@@ -835,17 +846,18 @@ class Unet_pp():
         self.depth = len(filters)
         
         self.model = Unet_plus(input_shape = input_shape,
-                                filters = filters, 
-                                num_classes = num_classes,
-                                activation = activation,
-                                dropout_rate = dropout_rate, 
-                                dropout_type = dropout_type,
-                                backbone_name = backbone_name,
-                                freeze_backbone = freeze_backbone,
-                                unfreeze_at = unfreeze_at,
-                                kernel_initializer = kernel_initializer,
-                                deep_supervision = self.deep_supervision,
-                                attention = attention)
+                               filters = filters, 
+                               num_classes = num_classes,
+                               activation = activation,
+                               dropout_rate = dropout_rate, 
+                               dropout_type = dropout_type,
+                               backbone_name = backbone_name,
+                               freeze_backbone = freeze_backbone,
+                               unfreeze_at = unfreeze_at,
+                               kernel_initializer = kernel_initializer,
+                               deep_supervision = self.deep_supervision,
+                               attention = attention
+                               )
     
     
     def load(self, path:str, load_weights_only=False):
@@ -874,7 +886,7 @@ class Unet_pp():
             input_layer = self.model.input
             self.model = Model(inputs=input_layer, outputs=output_layer)
         else:
-            print("This model was instantiated without Deep supervision enabled so it cannot be pruned! The prunning opperation will be skipped")
+            print("This model was instantiated without Deep supervision enabled so it cannot be pruned! The pruning operation will be skipped")
 
 
     def get_model(self):

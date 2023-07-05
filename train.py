@@ -18,7 +18,6 @@ from utils.helpers import *
 from utils.data_generator import DatasetGenerator
 from utils import utils
 from builders import model_builder
-from models.models_segmentation import Unet, Residual_Unet, Attention_Unet, Unet_plus, DeepLabV3plus
 
 import tensorflow as tf
 from keras import models
@@ -65,7 +64,6 @@ parser.add("-lf",   "--label_file",                 type=str,       required=Tru
 parser.add("-m",    "--model",                      type=str,       required=True,              help="choose the semantic segmentation methods")
 parser.add("-bm",   "--base_model",                 type=str,       default=None,               help="choose the base model")
 parser.add("-mw",   "--model_weights",              type=str,       default=None,               help="weights file of trained model for training continuation")
-parser.add("-bmw",  "--bm_weights",                 type=str,       default=None,               help="weights file of base model from pre training")
 parser.add("-bt",   "--batch_size",                 type=int,       default=4,                  help="training batch size")
 parser.add("-bv",   "--valid_batch_size",           type=int,       default=4,                  help="validation batch size")
 parser.add("-ie",   "--epochs",                     type=int,       default=10,                 help="number of epochs of training with freezed backbone")
@@ -95,7 +93,7 @@ parser.add("-cs",   "--channel_shift",              type=float,     default=0.0,
 
 
 def train(*args):
-    # read CLI
+    ## read CLI ##
     conf, unknown = parser.parse_known_args()
 
     # check args if conf.loop_training is true
@@ -122,10 +120,11 @@ def train(*args):
     paths = check_related_path(conf.output_dir)
 
     # get class names and class colors by parsing the labels py file
-    class_names, class_colors = get_labels(parse_convert_py(conf.label_file))
-    assert conf.num_classes == len(class_names)
+    _, class_colors = get_labels(parse_convert_py(conf.label_file))
+    assert conf.num_classes == len(class_colors)
 
-    # build training data pipeline
+    ## build data pipeline ##
+    # for training
     dataTrain, len_train, nbatch_train = DatasetGenerator(data_path=(conf.input_training, conf.label_training),
                                                           max_samples=conf.max_samples_training,
                                                           image_shape=conf.image_shape,
@@ -136,7 +135,7 @@ def train(*args):
                                                           epochs=conf.epochs)()
     print("Built data pipeline for {} training samples with {} batches per epoch".format(len_train, nbatch_train))
 
-    # build validation data pipeline
+    # for validation
     dataValid, len_valid, nbatch_valid = DatasetGenerator(data_path=(conf.input_validation, conf.label_validation),
                                                           max_samples=conf.max_samples_validation,
                                                           image_shape=conf.image_shape,
@@ -148,75 +147,50 @@ def train(*args):
     print("Built data pipeline for {} validation samples with {} batches per epoch".format(len_valid, nbatch_valid))
 
 
-    # build the model
-    # model, conf.base_model = model_builder(conf.num_classes, (conf.image_shape[0], conf.image_shape[1]), conf.model, conf.base_model,
-    #                                         conf.bm_weights)
-
-    # instantiate Model
-    MODEL_TYPE = 'DeepLabV3plus' # Unet
-    BACKBONE = 'EfficientNetV2M'
-    UNFREEZE_AT = 'block6a_expand_activation' # block4a_expand_activation
-    INPUT_SHAPE = [256, 256, 3] # do not change
-    OUTPUT_STRIDE = 32
-    FILTERS = [16, 32, 64, 128, 256]
-    ACTIVATION = 'leaky_relu' # swish, leaky_relu
-    DROPOUT_RATE = 0
-    PRETRAINED_WEIGHTS = None
-    NUM_CLASSES = conf.num_classes
-
-    model_function = eval(MODEL_TYPE)
-    model = model_function(input_shape=INPUT_SHAPE,
-                            filters=FILTERS,
-                            num_classes=NUM_CLASSES,
-                            output_stride=OUTPUT_STRIDE,
-                            activation=ACTIVATION,
-                            dropout_rate=DROPOUT_RATE,
-                            backbone_name=BACKBONE,
-                            freeze_backbone=False,
-                            weights=PRETRAINED_WEIGHTS
-                            )
+    ## build the model ##
+    model, conf.base_model = model_builder(conf.image_shape, conf.num_classes, conf.model, conf.base_model)
 
     # summary
     model.summary()
 
     # load weights
     if conf.model_weights is not None:
-        print('Loading the weights...')
+        print("Loading the weights from {}".format(conf.model_weights))
         model.load_weights(conf.model_weights)
 
-    # choose loss
+    ## choose loss ##
     losses = {
-        #losses.py
-        'ce': categorical_crossentropy_with_logits,
-        'focal_loss_': focal_loss(),
-        'miou_loss': miou_loss(num_classes=conf.num_classes),
-        'self_balanced_focal_loss': self_balanced_focal_loss(),
+        # losses.py
+        'ce'                    : categorical_crossentropy_with_logits,
+        'focal_loss'            : focal_loss(),
+        'miou_loss'             : miou_loss(num_classes=conf.num_classes),
+        'self_balanced_focal_loss'  : self_balanced_focal_loss(),
         
-        #losses_segmentation.py
-        'FocalHybridLoss': eval('FocalHybridLoss')(),
+        # loss_segmentation.py
+        'FocalHybridLoss'       : eval('FocalHybridLoss')(),
 
-        #loss_functions.py
-        'wce_loss': Semantic_loss_functions().weighted_cross_entropyloss,
-        'focal_loss': Semantic_loss_functions().focal_loss,
-        'dice_loss': Semantic_loss_functions().dice_loss,
-        'bce_dice_loss': Semantic_loss_functions().bce_dice_loss,
-        'tversky_loss': Semantic_loss_functions().tversky_loss,
-        'log_cosh_dice_loss': Semantic_loss_functions().log_cosh_dice_loss,
-        'jacard_loss': Semantic_loss_functions().jacard_loss,
-        'ssim_loss': Semantic_loss_functions().ssim_loss,
-        'unet3p_hybrid_loss': Semantic_loss_functions().unet3p_hybrid_loss,
-        'basnet_hybrid_loss': Semantic_loss_functions().basnet_hybrid_loss,
-        
-        #loss_func.py
-        'iou_loss': LossFunc(conf.num_classes).iou_loss,
-        'dice_loss_': LossFunc(conf.num_classes).dice_loss,
-        'ce_iou_loss': LossFunc(conf.num_classes).CEIoU_loss,
-        'ce_dice_loss': LossFunc(conf.num_classes).CEDice_loss,
+        # loss_functions.py
+        'wce_loss'              : Semantic_loss_functions().weighted_cross_entropyloss,
+        'focal_loss_'           : Semantic_loss_functions().focal_loss,
+        'dice_loss'             : Semantic_loss_functions().dice_loss,
+        'bce_dice_loss'         : Semantic_loss_functions().bce_dice_loss,
+        'tversky_loss'          : Semantic_loss_functions().tversky_loss,
+        'log_cosh_dice_loss'    : Semantic_loss_functions().log_cosh_dice_loss,
+        'jacard_loss'           : Semantic_loss_functions().jacard_loss,
+        'ssim_loss'             : Semantic_loss_functions().ssim_loss,
+        'unet3p_hybrid_loss'    : Semantic_loss_functions().unet3p_hybrid_loss,
+        'basnet_hybrid_loss'    : Semantic_loss_functions().basnet_hybrid_loss,
+
+        # loss_func.py
+        'iou_loss'              : LossFunc(conf.num_classes).iou_loss,
+        'dice_loss_'            : LossFunc(conf.num_classes).dice_loss,
+        'ce_iou_loss'           : LossFunc(conf.num_classes).CEIoU_loss,
+        'ce_dice_loss'          : LossFunc(conf.num_classes).CEDice_loss
     }
 
     loss = losses[conf.loss] if conf.loss is not None else categorical_crossentropy_with_logits
 
-    # chose optimizer
+    ## chose optimizer ##
     OPTIMIZER_NAME = conf.optimizer
     WEIGHT_DECAY = 0.00005
     MOMENTUM = 0.9
@@ -227,7 +201,7 @@ def train(*args):
 
     lr_schedule = tf.keras.optimizers.schedules.PolynomialDecay(
         initial_learning_rate=START_LR,
-        decay_steps=LR_DECAY_EPOCHS*n_batches_train,
+        decay_steps=LR_DECAY_EPOCHS*nbatch_train,
         end_learning_rate=END_LR,
         power=POWER,
         cycle=False,
@@ -250,17 +224,17 @@ def train(*args):
 
     optimizer = optimizers[conf.optimizer]
 
-    # metrics
+    ## metrics ##
     metrics = [tf.keras.metrics.CategoricalAccuracy(), MeanIoU(conf.num_classes)]
 
-    # compile the model
+    ## compile the model ##
     model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
     print("Compiled model *{}_based_on_{}*".format(conf.model, conf.base_model))
 
-    # callbacks setting
+    ## callbacks setting ##
     # training and validation steps
-    steps_per_epoch     = int(n_batches_train)
-    validation_steps    = int(n_batches_valid)
+    steps_per_epoch     = int(nbatch_train)
+    validation_steps    = int(nbatch_valid)
     # create callbacks to be called after each epoch
     class CustomCallback(tf.keras.callbacks.Callback):
         def on_epoch_end(self, epoch, logs=None):
@@ -293,7 +267,7 @@ def train(*args):
     callbacks = [tensorboard_cb, csvlogger_cb, checkpoint_cb, best_checkpoint_cb, early_stopping_cb, lr_cb]
 
 
-    # begin training
+    ## begin training ##
     print("\n***** Begin training *****")
     print("GPU -->", tf.config.list_physical_devices('GPU'))
     print("Dataset -->", conf.dataset)
@@ -329,7 +303,7 @@ def train(*args):
         for key, value in vars(conf).items():
             f.write('%s:%s\n' % (key, value))
 
-    # training
+    ## training ##
     history = model.fit(dataTrain,
                         epochs=conf.epochs, initial_epoch=0, steps_per_epoch=steps_per_epoch,
                         validation_data=dataValid, validation_steps=validation_steps, validation_freq=conf.validation_freq,

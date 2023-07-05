@@ -16,11 +16,11 @@ backend = tf.keras.backend
 
 
 class BiSegNet(Network):
-    def __init__(self, num_classes, input_size=None, version='BiSegNet', base_model='Xception', **kwargs):
+    def __init__(self, input_shape: tuple, num_classes: int, version='BiSegNet', base_model='Xception', **kwargs):
         """
         The initialization of BiSegNet.
+        :param input_shape: the size of input image
         :param num_classes: the number of predicted classes
-        :param input_size: the size of input image
         :param version: 'BiSegNet'
         :param base_model: the backbone model
         :param kwargs: other parameters
@@ -30,10 +30,10 @@ class BiSegNet(Network):
         assert version == 'BiSegNet'
         
         super(BiSegNet, self).__init__(num_classes, version, base_model, **kwargs)
-        self.input_size = input_size        
+        self.input_shape = input_shape        
 
     def __call__(self, **kwargs):
-        inputs = layers.Input(shape=self.input_size + (3,))
+        inputs = layers.Input(shape=self.input_shape + (3,))
         return self._bisegnet(inputs)
 
     def _conv_block(self, x, filters, kernel_size=3, strides=1):

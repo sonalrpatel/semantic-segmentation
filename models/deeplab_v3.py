@@ -16,10 +16,11 @@ backend = tf.keras.backend
 
 
 class DeepLabV3(Network):
-    def __init__(self, num_classes, input_size=None, version='DeepLabV3', base_model='ResNet50', **kwargs):
+    def __init__(self, input_shape: tuple, num_classes: int, version='DeepLabV3', base_model='ResNet50', **kwargs):
         """
         The initialization of DeepLabV3.
-        :param num_classes: the number of predicted classes.
+        :param input_shape: the size of input image        
+        :param num_classes: the number of predicted classes
         :param version: 'DeepLabV3'
         :param base_model: the backbone model
         :param kwargs: other parameters
@@ -43,10 +44,10 @@ class DeepLabV3(Network):
         
         super(DeepLabV3, self).__init__(num_classes, version, base_model, dilation, **kwargs)
         self.dilation = dilation
-        self.input_size = input_size
+        self.input_shape = input_shape
 
     def __call__(self, **kwargs):
-        inputs = layers.Input(shape=self.input_size + (3,))
+        inputs = layers.Input(shape=self.input_shape + (3,))
         return self._deeplabv3(inputs)
 
     def _deeplabv3(self, inputs):

@@ -16,11 +16,11 @@ backend = tf.keras.backend
 
 
 class PAN(Network):
-    def __init__(self, num_classes, input_size=None, version='PAN', base_model='ResNet50', **kwargs):
+    def __init__(self, input_shape: tuple, num_classes: int, version='PAN', base_model='ResNet50', **kwargs):
         """
         The initialization of PAN.
+        :param input_shape: the size of input image        
         :param num_classes: the number of predicted classes
-        :param input_size: the size of input image
         :param version: 'PAN'
         :param base_model: the backbone model
         :param kwargs: other parameters
@@ -48,10 +48,10 @@ class PAN(Network):
         assert version == 'PAN'
 
         super(PAN, self).__init__(num_classes, version, base_model, dilation, **kwargs)
-        self.input_size = input_size
+        self.input_shape = input_shape
 
     def __call__(self, **kwargs):
-        inputs = layers.Input(shape=self.input_size + (3,))
+        inputs = layers.Input(shape=self.input_shape + (3,))
         return self._pan(inputs)
 
     def _conv_bn_relu(self, x, filters, kernel_size, strides=1):

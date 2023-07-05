@@ -16,11 +16,11 @@ backend = tf.keras.backend
 
 
 class DeepLabV3Plus(Network):
-    def __init__(self, num_classes, input_size=None, version='DeepLabV3Plus', base_model='Xception-DeepLab', **kwargs):
+    def __init__(self, input_shape: tuple, num_classes: int, version='DeepLabV3Plus', base_model='Xception-DeepLab', **kwargs):
         """
         The initialization of DeepLabV3Plus.
+        :param input_shape: the size of input image        
         :param num_classes: the number of predicted classes
-        :param input_size: the size of input image
         :param version: 'DeepLabV3Plus'
         :param base_model: the backbone model
         :param kwargs: other parameters
@@ -44,10 +44,10 @@ class DeepLabV3Plus(Network):
         
         super(DeepLabV3Plus, self).__init__(num_classes, version, base_model, dilation, **kwargs)
         self.dilation = dilation
-        self.input_size = input_size
+        self.input_shape = input_shape
 
     def __call__(self, **kwargs):
-        inputs = layers.Input(shape=self.input_size + (3,))
+        inputs = layers.Input(shape=self.input_shape + (3,))
         return self._deeplab_v3_plus(inputs)
 
     def _conv_bn_relu(self, x, filters, kernel_size, strides=1):

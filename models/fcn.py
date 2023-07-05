@@ -15,11 +15,12 @@ backend = tf.keras.backend
 
 
 class FCN(Network):
-    def __init__(self, num_classes, input_size=None, version='FCN-8s', base_model='VGG16', **kwargs):
+    def __init__(self, input_shape: tuple, num_classes: int, version='FCN-8s', base_model='VGG16', **kwargs):
         """
         The initialization of FCN-8s/16s/32s.
-        :param num_classes: the number of predicted classes.
-        :param version: 'FCN-8s', 'FCN-16s' or 'FCN-32s'.
+        :param input_shape: the size of input image        
+        :param num_classes: the number of predicted classes
+        :param version: 'FCN-8s', 'FCN-16s' or 'FCN-32s'
         :param base_model: the backbone model
         :param kwargs: other parameters
         """
@@ -32,10 +33,10 @@ class FCN(Network):
 
         super(FCN, self).__init__(num_classes, version, base_model, **kwargs)
         self.fcn = fcn[version]
-        self.input_size = input_size
+        self.input_shape = input_shape
 
     def __call__(self, **kwargs):
-        inputs = layers.Input(shape=self.input_size + (3,))
+        inputs = layers.Input(shape=self.input_shape + (3,))
         return self.fcn(inputs)
 
     def _conv_relu(self, x, filters, kernel_size=1):

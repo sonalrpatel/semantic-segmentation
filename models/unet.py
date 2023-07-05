@@ -14,11 +14,11 @@ backend = tf.keras.backend
 
 
 class UNet(Network):
-    def __init__(self, num_classes, input_size=None, version='UNet', base_model='VGG16', **kwargs):
+    def __init__(self, input_shape: tuple, num_classes: int, version='UNet', base_model='VGG16', **kwargs):
         """
         The initialization of UNet.
+        :param input_shape: the size of input image
         :param num_classes: the number of predicted classes
-        :param input_size: the size of input image
         :param version: 'UNet'
         :param base_model: the backbone model
         :param kwargs: other parameters
@@ -28,15 +28,15 @@ class UNet(Network):
         assert version == 'UNet'
         assert base_model in ['VGG16',
                               'VGG19',
-                              'ResNet50_KA',
+                              'ResNet50KA',
                               'MobileNetV1',
                               'MobileNetV2']
         
         super(UNet, self).__init__(num_classes, version, base_model, **kwargs)
-        self.input_size = input_size
+        self.input_shape = input_shape
 
     def __call__(self, **kwargs):
-        inputs = layers.Input(shape=self.input_size + (3,))
+        inputs = layers.Input(shape=self.input_shape + (3,))
         return self._unet(inputs)
 
     def _conv_bn_relu(self, x, filters, kernel_size=1, strides=1):

@@ -7,6 +7,7 @@ The model builder to build different semantic segmentation models.
 
 """
 from models import *
+from models.models_segmentation import Unet, Residual_Unet, Attention_Unet, Unet_plus, DeepLabV3plus
 
 models = {'FCN-8s': FCN,
           'FCN-16s': FCN,
@@ -22,19 +23,48 @@ models = {'FCN-8s': FCN,
           'DeepLabV3Plus': DeepLabV3Plus,
           'BiSegNet': BiSegNet}
 
+models_seg = {'Unet': Unet,
+              'Residual_Unet': Residual_Unet,
+              'Attention_Unet': Attention_Unet,
+              'Unet_plus': Unet_plus,
+              'DeepLabV3plus': DeepLabV3plus}
 
-def model_builder(num_classes, input_size=(256, 256), model='SegNet', base_model=None, bm_weights=None):
-    assert model in models
-    assert isinstance(input_size, tuple)
 
-    # initialise the selected model class
-    # passing bm_weights as part of **kwargs as it is not used for all models
-    model = models[model](num_classes, input_size, model, base_model, **{'bm_weights': bm_weights})
-    
-    # get the base_model name
-    base_model = model.get_base_model()
+def model_builder(input_shape: tuple, num_classes: int, model='DeepLabV3', base_model=None):
+    assert model in models or models_seg
 
-    # build the model by calling __call__
-    model = model()
+    if model in models:
+        # initialise __init__ of the selected model class
+        model = models[model](input_shape, num_classes, model, base_model)
+        
+        # get the base_model name
+        base_model = model.get_base_model()
+
+        # build the model by calling __call__
+        model = model()
+    else:
+        # instantiate model
+        MODEL_TYPE = model
+        BACKBONE = base_model
+        UNFREEZE_AT = 'block6a_expand_activation'
+        INPUT_SHAPE = input_shape + [3]
+        FILTERS = [16, 32, 64, 128, 256]
+        NUM_CLASSES = num_classes        
+        OUTPUT_STRIDE = 32
+        ACTIVATION = 'leaky_relu'
+        DROPOUT_RATE = 0
+        PRETRAINED_WEIGHTS = None
+
+        model_function = eval(MODEL_TYPE)
+        model = model_function(input_shape=INPUT_SHAPE,
+                                filters=FILTERS,
+                                num_classes=NUM_CLASSES,
+                                output_stride=OUTPUT_STRIDE,
+                                activation=ACTIVATION,
+                                dropout_rate=DROPOUT_RATE,
+                                backbone_name=BACKBONE,
+                                freeze_backbone=False,
+                                weights=PRETRAINED_WEIGHTS
+                                )
 
     return model, base_model

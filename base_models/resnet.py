@@ -11,7 +11,7 @@ import tensorflow as tf
 
 layers = tf.keras.layers
 backend = tf.keras.backend
-appl = tf.keras.applications
+keras_appl = tf.keras.applications
 
 
 class ResNet(object):
@@ -208,16 +208,15 @@ class ResNet(object):
             return [self.outputs[ci] for ci in output_stages]
 
 
-class ResNet_KA(object):
-    def __init__(self, version='ResNet50', bm_weights=None, **kwargs):
+class ResNetKA(object):
+    def __init__(self, version='ResNet50KA', **kwargs):
         """
        The implementation of ResNet based on Keras.Application.
        :param version: 'ResNet50'
        :param kwargs: other parameters.
        """
-        super(ResNet_KA, self).__init__(**kwargs)
+        super(ResNetKA, self).__init__(**kwargs)
         self.version = version
-        self.bm_weights = bm_weights
 
     def __call__(self, inputs, output_stages='c5', **kwargs):
         """
@@ -227,14 +226,14 @@ class ResNet_KA(object):
         :param kwargs: other parameters.
         :return: the output of different stages.
         """
-        resnet50 = appl.ResNet50(input_tensor=inputs, weights=self.bm_weights, include_top=False)
+        resnet = keras_appl.ResNet50(input_tensor=inputs, include_top=False)
 
-        c0 = resnet50.get_layer("input_1").output               # c0-inputs : - x - x 3
-        c1 = resnet50.get_layer("conv1_relu").output            # c1-skip   : - x - x 64
-        c2 = resnet50.get_layer("conv2_block3_out").output      # c2-skip   : - x - x 256
-        c3 = resnet50.get_layer("conv3_block4_out").output      # c3-skip   : - x - x 512
-        c4 = resnet50.get_layer("conv4_block6_out").output      # c4-skip   : - x - x 1024
-        c5 = resnet50.get_layer("conv5_block3_out").output      # c5-bridge : - x - x 2048
+        c0 = resnet.get_layer("input_1").output               # c0-inputs : - x - x 3
+        c1 = resnet.get_layer("conv1_relu").output            # c1-skip   : - x - x 64
+        c2 = resnet.get_layer("conv2_block3_out").output      # c2-skip   : - x - x 256
+        c3 = resnet.get_layer("conv3_block4_out").output      # c3-skip   : - x - x 512
+        c4 = resnet.get_layer("conv4_block6_out").output      # c4-skip   : - x - x 1024
+        c5 = resnet.get_layer("conv5_block3_out").output      # c5-bridge : - x - x 2048
 
         self.outputs = {'c1': c1,
                         'c2': c2,
