@@ -47,6 +47,7 @@ def model_builder(input_shape: tuple, num_classes: int, model='DeepLabV3', base_
         MODEL_TYPE = model
         BACKBONE = base_model
         UNFREEZE_AT = 'block6a_expand_activation'
+        FREEZE_BACKBONE = False
         INPUT_SHAPE = input_shape + [3]
         FILTERS = [16, 32, 64, 128, 256]
         NUM_CLASSES = num_classes        
@@ -57,14 +58,14 @@ def model_builder(input_shape: tuple, num_classes: int, model='DeepLabV3', base_
 
         model_function = eval(MODEL_TYPE)
         model = model_function(input_shape=INPUT_SHAPE,
-                                filters=FILTERS,
-                                num_classes=NUM_CLASSES,
-                                output_stride=OUTPUT_STRIDE,
-                                activation=ACTIVATION,
-                                dropout_rate=DROPOUT_RATE,
-                                backbone_name=BACKBONE,
-                                freeze_backbone=False,
-                                weights=PRETRAINED_WEIGHTS
-                                )
+                               filters=FILTERS,
+                               num_classes=NUM_CLASSES,
+                               output_stride=OUTPUT_STRIDE,
+                               activation=ACTIVATION,
+                               dropout_rate=DROPOUT_RATE,
+                               backbone_name=BACKBONE,
+                               freeze_backbone=FREEZE_BACKBONE,
+                               weights=PRETRAINED_WEIGHTS
+                               )
 
     return model, base_model
