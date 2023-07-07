@@ -70,7 +70,7 @@ def resize_image_op(img, fromShape, toShape, cropToPreserveAspectRatio=True, int
 
 
 def normalize_image(img):
-    return img / 255.
+    return img / 255
 
 
 def normalize_image_op(img):
@@ -175,14 +175,15 @@ def random_channel_shift(image, label, channel_shift_range):
     return image, label
 
 
-def do_augmentation(img, flip=0, mask=False):
+def do_augmentation(img, seed, mask=False):
+    img = tf.image.random_flip_left_right(img, seed=seed)
     if mask is False:
-        img = tf.image.random_brightness(img, max_delta=0.5)
-        img = tf.image.random_saturation(img, lower=0.5, upper=1.5)
-        img = tf.image.random_hue(img, max_delta=0.2)
-        img = tf.image.random_contrast(img, lower=0.5, upper=1.5)
-    img = tf.case([(tf.greater(flip, 0), lambda: tf.image.flip_left_right(img))], default=lambda: img)
-
+        img = tf.image.random_brightness(img, max_delta=0.5, seed=seed)
+        img = tf.image.random_contrast(img, lower=0.5, upper=1.5, seed=seed)
+        img = tf.image.random_jpeg_quality(img, min_jpeg_quality=75, max_jpeg_quality=95, seed=seed)
+        # img = tf.image.stateless_random_brightness(img, max_delta=0.5, seed=seed)
+        # img = tf.image.stateless_random_contrast(img, lower=0.5, upper=1.5, seed=seed)
+        # img = tf.image.stateless_random_jpeg_quality(img, min_jpeg_quality=75, max_jpeg_quality=95, seed=seed)
     return img
 
 
@@ -289,8 +290,21 @@ def one_hot_encode_op(mask, class_colors):
 #     return one_hot_map
 
 
-def decode_one_hot(one_hot_map):
+def decode_one_hot_gray(one_hot_map):
     return np.argmax(one_hot_map, axis=-1)
+
+
+def decode_one_hot(one_hot_map, color_map):
+    pred = np.argmax(one_hot_map, axis=-1)
+    color_codes = np.array(color_map)
+    pred = color_codes[pred.astype(int)]
+    return pred
+
+
+def decode_one_hot_op(one_hot_map, color_map):
+    pred = tf.argmax(one_hot_map, axis=-1)
+    pred = tf.convert_to_tensor(np.array(color_map)[tf.cast(pred, tf.int8)])
+    return pred
 
 
 def reverse_one_hot(image):

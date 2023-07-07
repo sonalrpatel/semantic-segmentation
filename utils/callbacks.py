@@ -66,3 +66,8 @@ class LearningRateScheduler(callbacks.Callback):
     def on_epoch_end(self, epoch, logs=None):
         logs = logs or {}
         logs['lr'] = backend.get_value(self.model.optimizer.lr)
+
+
+class LearningRateGetvalue(tf.keras.callbacks.Callback):
+    def on_epoch_end(self, epoch, logs=None):
+        print("\nLearning Rate is {}".format(backend.get_value(self.model.optimizer.lr)))

@@ -147,6 +147,7 @@ class DatasetGenerator(object):
         self.shuffle = shuffle
         self.epochs = epochs
         self.batch_size = batch_size
+        self.seed = 42
 
     # read files from data path
     def dataset_from_path(self):
@@ -177,11 +178,11 @@ class DatasetGenerator(object):
             image = resize_image_op(image, org_shape['image'], self.image_shape, interpolation=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
             label = resize_image_op(label, org_shape['label'], self.image_shape, interpolation=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
             
-            if self.augment is True:
-                image = do_augmentation(image)
-                label = do_augmentation(label, mask=True)
+            if self.augment:
+                image = do_augmentation(image, seed=self.seed)
+                label = do_augmentation(label, seed=self.seed, mask=True)
             
-            image = normalize_image_op(image)
+            image = normalize_image(image)
             label = one_hot_encode_op(label, self.class_colors)
             return image, label
 

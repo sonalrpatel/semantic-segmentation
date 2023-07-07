@@ -6,7 +6,7 @@ The file defines the training process.
 @Project: https://github.com/luyanger1799/amazing-semantic-segmentation
 
 """
-from utils.callbacks import LearningRateScheduler
+from utils.callbacks import LearningRateScheduler, LearningRateGetvalue
 from utils.optimizers import *
 from utils.learning_rate import *
 from utils.metrics import MeanIoU
@@ -200,7 +200,7 @@ def train(*args):
         'cosine_decay'     : cosine_decay(conf.learning_rate, conf.epochs, warmup=conf.lr_warmup),
         'polynomial_decay' : polynomial_decay(nbatch_train)
         }
-    lr_decay = lr_decays[conf.lr_scheduler]
+    lr_scheduler = lr_decays[conf.lr_scheduler]
 
     # optimizer
     optimizers = {
@@ -210,11 +210,11 @@ def train(*args):
         'adamw'     : AdamW(learning_rate=conf.learning_rate, weight_decay=0.00005),
         'sgdw'      : SGDW(learning_rate=conf.learning_rate, momentum=0.99, weight_decay=0.00005),
 
-        'Adam'      : Adam(lr_decay),
-        'Adadelta'  : Adadelta(lr_decay),
-        'AdamW'     : AdamW(learning_rate=lr_decay, weight_decay=0.00005),
-        'AdaBelief' : AdaBelief(learning_rate=lr_decay),
-        'SGDW'      : SGDW(learning_rate=lr_decay, weight_decay=0.00005, momentum=0.9)
+        'Adam'      : Adam(lr_scheduler),
+        'Adadelta'  : Adadelta(lr_scheduler),
+        'AdamW'     : AdamW(learning_rate=lr_scheduler, weight_decay=0.00005),
+        'AdaBelief' : AdaBelief(learning_rate=lr_scheduler),
+        'SGDW'      : SGDW(learning_rate=lr_scheduler, weight_decay=0.00005, momentum=0.9)
         }
     optimizer = optimizers[conf.optimizer]
 
@@ -229,11 +229,8 @@ def train(*args):
     # training and validation steps
     steps_per_epoch     = int(nbatch_train)
     validation_steps    = int(nbatch_valid)
+    
     # create callbacks to be called after each epoch
-    class CustomCallback(tf.keras.callbacks.Callback):
-        def on_epoch_end(self, epoch, logs=None):
-            print("\nLearning Rate is {}".format(self.model.optimizer.lr))
-        
     tensorboard_cb      = TensorBoard(paths['logs_path'], update_freq="epoch", profile_batch=0)
     csvlogger_cb        = CSVLogger(os.path.join(paths['checkpoints_path'], "log.csv"), append=True, separator=',')
     checkpoint_cb       = ModelCheckpoint(os.path.join(paths['checkpoints_path'],
@@ -244,12 +241,12 @@ def train(*args):
     best_checkpoint_cb  = ModelCheckpoint(os.path.join(paths['weights_path'], "weights1.hdf5"),
                                             save_best_only=True, monitor="val_mean_io_u", mode="max", save_weights_only=False)
     early_stopping_cb   = EarlyStopping(monitor="val_mean_io_u", mode="max", patience=conf.early_stopping_patience, verbose=1)
-    lr_scheduler_cb     = LearningRateScheduler(lr_decay, conf.learning_rate, conf.lr_warmup, steps_per_epoch, verbose=1)
-    lr_cb               = CustomCallback()
+    lr_scheduler_cb     = LearningRateScheduler(lr_scheduler, conf.learning_rate, conf.lr_warmup, steps_per_epoch, verbose=1)
+    lr_getvalue_cb      = LearningRateGetvalue()
 
-    # callbacks list
+    # list of callbacks
     # callbacks = [tensorboard_cb, csvlogger_cb, checkpoint_cb, best_checkpoint_cb, lr_scheduler_cb, early_stopping_cb, lr_cb]
-    callbacks = [tensorboard_cb, csvlogger_cb, checkpoint_cb, best_checkpoint_cb, early_stopping_cb, lr_cb]
+    callbacks = [tensorboard_cb, csvlogger_cb, checkpoint_cb, best_checkpoint_cb, early_stopping_cb, lr_getvalue_cb]
 
 
     ## begin training ##
