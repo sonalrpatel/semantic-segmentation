@@ -179,8 +179,8 @@ class DatasetGenerator(object):
             label = resize_image_op(label, org_shape['label'], self.image_shape, interpolation=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
             
             if self.augment:
-                image = do_augmentation(image, seed=self.seed)
-                label = do_augmentation(label, seed=self.seed, mask=True)
+                image, label = Augment()(image, label)
+                image, label = do_augmentation(image, label)
             
             image = normalize_image(image)
             label = one_hot_encode_op(label, self.class_colors)

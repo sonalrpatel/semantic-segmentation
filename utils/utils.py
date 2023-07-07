@@ -175,16 +175,32 @@ def random_channel_shift(image, label, channel_shift_range):
     return image, label
 
 
-def do_augmentation(img, seed, mask=False):
+class Augment(tf.keras.layers.Layer):
+    def __init__(self, seed=42):
+        super().__init__()
+        # both use the same seed, so they'll make the same random changes.
+        # self.augment_inputs = tf.keras.Sequential([tf.keras.layers.RandomFlip("horizontal", seed=seed),
+        #                                            tf.keras.layers.RandomRotation(0.2, seed=seed),
+        #                                            ])
+        self.augment_inputs = tf.keras.layers.RandomFlip(mode="horizontal", seed=seed)
+        self.augment_labels = tf.keras.layers.RandomFlip(mode="horizontal", seed=seed)
+
+    def call(self, inputs, labels):
+        inputs = self.augment_inputs(inputs)
+        labels = self.augment_labels(labels)
+        return inputs, labels
+
+
+def do_augmentation(img, lbl, seed):
+    lbl = tf.image.random_flip_left_right(lbl, seed=seed)
     img = tf.image.random_flip_left_right(img, seed=seed)
-    if mask is False:
-        img = tf.image.random_brightness(img, max_delta=0.5, seed=seed)
-        img = tf.image.random_contrast(img, lower=0.5, upper=1.5, seed=seed)
-        img = tf.image.random_jpeg_quality(img, min_jpeg_quality=75, max_jpeg_quality=95, seed=seed)
-        # img = tf.image.stateless_random_brightness(img, max_delta=0.5, seed=seed)
-        # img = tf.image.stateless_random_contrast(img, lower=0.5, upper=1.5, seed=seed)
-        # img = tf.image.stateless_random_jpeg_quality(img, min_jpeg_quality=75, max_jpeg_quality=95, seed=seed)
-    return img
+    img = tf.image.random_brightness(img, max_delta=0.5, seed=seed)
+    img = tf.image.random_contrast(img, lower=0.5, upper=1.5, seed=seed)
+    img = tf.image.random_jpeg_quality(img, min_jpeg_quality=75, max_jpeg_quality=95, seed=seed)
+    # img = tf.image.stateless_random_brightness(img, max_delta=0.5, seed=seed)
+    # img = tf.image.stateless_random_contrast(img, lower=0.5, upper=1.5, seed=seed)
+    # img = tf.image.stateless_random_jpeg_quality(img, min_jpeg_quality=75, max_jpeg_quality=95, seed=seed)
+    return img, lbl
 
 
 def one_hot_encode_gray(label, num_classes):
