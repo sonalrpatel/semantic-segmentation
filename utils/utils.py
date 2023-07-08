@@ -15,67 +15,55 @@ tf_image = tf.keras.preprocessing.image
 
 
 def load_image(filename):
-    img = cv2.imread(filename)
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    image = cv2.imread(filename)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     
-    return img
+    return image
 
 
-def load_image_op(filename):
-    img = tf.io.read_file(filename)
-    img = tf.image.decode_png(img, channels=3)
+def load_image_op(filename, channels=3):
+    image = tf.io.read_file(filename)
+    image = tf.image.decode_png(image, channels=channels)
     
-    return img
+    return image
 
 
-def resize_image(img, shape, interpolation=cv2.INTER_CUBIC):
+def resize_image(image, shape, interpolation=cv2.INTER_CUBIC):
     # resize relevant image axis to length of corresponding target axis while preserving aspect ratio
-    axis = 0 if float(shape[0]) / float(img.shape[0]) > float(shape[1]) / float(img.shape[1]) else 1
-    factor = float(shape[axis]) / float(img.shape[axis])
-    img = cv2.resize(img, (0, 0), fx=factor, fy=factor, interpolation=interpolation)
+    axis = 0 if float(shape[0]) / float(image.shape[0]) > float(shape[1]) / float(image.shape[1]) else 1
+    factor = float(shape[axis]) / float(image.shape[axis])
+    image = cv2.resize(image, (0, 0), fx=factor, fy=factor, interpolation=interpolation)
 
     # crop other image axis to match target shape
-    center = img.shape[int(not axis)] / 2.0
+    center = image.shape[int(not axis)] / 2.0
     step = shape[int(not axis)] / 2.0
     left = int(center-step)
     right = int(center+step)
     if axis == 0:
-        img = img[:, left:right]
+        image = image[:, left:right]
     else:
-        img = img[left:right, :]
+        image = image[left:right, :]
     
-    return img
+    return image
 
 
-def resize_image_op(img, fromShape, toShape, cropToPreserveAspectRatio=True, interpolation=tf.image.ResizeMethod.BICUBIC):
-    if not cropToPreserveAspectRatio:
-        img = tf.image.resize(img, toShape, method=interpolation)
+def resize_image_op(image, image_shape, preserve_aspect_ratio=False, interpolation=tf.image.ResizeMethod.NEAREST_NEIGHBOR):
+    if not preserve_aspect_ratio:
+        image = tf.image.resize(image, image_shape, method=interpolation)
     else:
-        # first crop to match target aspect ratio
-        fx = toShape[1] / fromShape[1]
-        fy = toShape[0] / fromShape[0]
-        relevantAxis = 0 if fx < fy else 1
-        if relevantAxis == 0:
-            crop = fromShape[0] * toShape[1] / toShape[0]
-            img = tf.image.crop_to_bounding_box(img, 0, int((fromShape[1] - crop) / 2), fromShape[0], int(crop))
-        else:
-            crop = fromShape[1] * toShape[0] / toShape[1]
-            img = tf.image.crop_to_bounding_box(img, int((fromShape[0] - crop) / 2), 0, int(crop), fromShape[1])
-
-        # then resize to target shape
-        img = tf.image.resize(img, toShape, method=interpolation)
-    
-    img = tf.cast(img, dtype=tf.uint8)
-    return img
+        image = tf.image.resize_with_pad(image, image_shape[0], image_shape[1], method=interpolation)
+    return image
 
 
-def normalize_image(img):
-    return img / 255
+def normalize_image(image):
+    return image / 255.
 
 
-def normalize_image_op(img):
-    # 3-D tensor with mean ~= 0 and variance ~= 1
-    return tf.image.per_image_standardization(img)
+def normalize_image_op(image):
+    # mean ~= 0 and variance ~= 1
+    # return tf.image.per_image_standardization(image)
+    # min ~= 0 and max ~= 1
+    return tf.cast(image, tf.float32) / 255.0
 
 
 def random_crop(image, label, crop_size):
@@ -182,8 +170,8 @@ class Augment(tf.keras.layers.Layer):
         # self.augment_inputs = tf.keras.Sequential([tf.keras.layers.RandomFlip("horizontal", seed=seed),
         #                                            tf.keras.layers.RandomRotation(0.2, seed=seed),
         #                                            ])
-        self.augment_inputs = tf.keras.layers.RandomFlip(mode="horizontal", seed=seed)
-        self.augment_labels = tf.keras.layers.RandomFlip(mode="horizontal", seed=seed)
+        self.augment_inputs = tf.image.stateless_random_flip_left_right(image, seed=(42, 101))
+        self.augment_labels = tf.image.stateless_random_flip_left_right(image, seed=(42, 101))
 
     def call(self, inputs, labels):
         inputs = self.augment_inputs(inputs)
@@ -191,16 +179,15 @@ class Augment(tf.keras.layers.Layer):
         return inputs, labels
 
 
-def do_augmentation(img, lbl, seed):
-    lbl = tf.image.random_flip_left_right(lbl, seed=seed)
-    img = tf.image.random_flip_left_right(img, seed=seed)
-    img = tf.image.random_brightness(img, max_delta=0.5, seed=seed)
-    img = tf.image.random_contrast(img, lower=0.5, upper=1.5, seed=seed)
-    img = tf.image.random_jpeg_quality(img, min_jpeg_quality=75, max_jpeg_quality=95, seed=seed)
-    # img = tf.image.stateless_random_brightness(img, max_delta=0.5, seed=seed)
-    # img = tf.image.stateless_random_contrast(img, lower=0.5, upper=1.5, seed=seed)
-    # img = tf.image.stateless_random_jpeg_quality(img, min_jpeg_quality=75, max_jpeg_quality=95, seed=seed)
-    return img, lbl
+def augment(image, label, seed=(42, 101)):
+    # label = tf.keras.layers.RandomFlip(mode="horizontal", seed=seed)(label)
+    # image = tf.keras.layers.RandomFlip(mode="horizontal", seed=seed)(image)
+    label = tf.image.stateless_random_flip_left_right(label, seed=seed)
+    image = tf.image.stateless_random_flip_left_right(image, seed=seed)
+    image = tf.image.stateless_random_brightness(image, max_delta=0.5, seed=seed)
+    image = tf.image.stateless_random_contrast(image, lower=0.5, upper=1.5, seed=seed)
+    image = tf.image.stateless_random_jpeg_quality(image, min_jpeg_quality=75, max_jpeg_quality=95, seed=seed)
+    return image, label
 
 
 def one_hot_encode_gray(label, num_classes):
@@ -351,17 +338,17 @@ def reverse_one_hot(image):
     return x
 
 
-def make_prediction(model, img=None, img_path=None, shape=None):
+def make_prediction(model, image=None, img_path=None, shape=None):
     """
     Predict the hot encoded categorical label from the image.
     Later, convert it numerical label.
     """
-    if img is not None:  # dim = H*W*3
-        img = np.expand_dims(img, axis=0)  # dim = 1*H*W*3
+    if image is not None:  # dim = H*W*3
+        image = np.expand_dims(image, axis=0)  # dim = 1*H*W*3
     if img_path is not None:
-        img = tf_image.img_to_array(tf_image.load_img(img_path, target_size=shape)) / 255.
-        img = np.expand_dims(img, axis=0)  # dim = 1*H*W*3
-    label = model.predict(img)  # dim = 1*H*W*N
+        image = tf_image.img_to_array(tf_image.load_img(img_path, target_size=shape)) / 255.
+        image = np.expand_dims(image, axis=0)  # dim = 1*H*W*3
+    label = model.predict(image)  # dim = 1*H*W*N
     label = np.argmax(label[0], axis=2)  # dim = H*W
 
     return label

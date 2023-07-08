@@ -158,9 +158,6 @@ class DatasetGenerator(object):
         image_file = np.take(image_file, ids)
         label_file = np.take(label_file, ids)
         data_path_ds = tf.data.Dataset.from_tensor_slices((image_file, label_file))
-
-        # original image & label shape
-        org_shape = {'image': load_image(image_file[0]).shape[0:2], 'label': load_image(label_file[0]).shape[0:2]}
         
         # load files
         def load_files(image_file, label_file):
@@ -168,40 +165,65 @@ class DatasetGenerator(object):
             label = load_image_op(label_file)
             return image, label
         
-        dataset = data_path_ds.map(load_files, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-        return dataset, len(dataset), org_shape
+        dataset = data_path_ds.map(load_files, num_parallel_calls=tf.data.AUTOTUNE)
+        return dataset, len(dataset)
 
     # preprocess dataset
-    def preprocess_dataset(self, dataset: tf.data.Dataset, org_shape: dict):
+    def preprocess_dataset(self, dataset: tf.data.Dataset):
         # load data
         def load_data(image, label):
-            image = resize_image_op(image, org_shape['image'], self.image_shape, interpolation=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
-            label = resize_image_op(label, org_shape['label'], self.image_shape, interpolation=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+            image = resize_image_op(image, self.image_shape)
+            label = resize_image_op(label, self.image_shape)
             
             if self.augment:
-                image, label = Augment()(image, label)
-                image, label = do_augmentation(image, label)
+                image, label = augment(image, label)
             
-            image = normalize_image(image)
+            image = normalize_image_op(image)
             label = one_hot_encode_op(label, self.class_colors)
             return image, label
 
-        dataset = dataset.map(load_data, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        dataset = dataset.map(load_data, num_parallel_calls=tf.data.AUTOTUNE)
         return dataset
 
     def configure_dataset(self, dataset: tf.data.Dataset):
         if self.shuffle:
-            dataset = dataset.shuffle(buffer_size=1000)
-        dataset = dataset.batch(self.batch_size, drop_remainder=True, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+            dataset = dataset.shuffle(buffer_size=self.batch_size*100)
+        dataset = dataset.batch(self.batch_size, drop_remainder=True, num_parallel_calls=tf.data.AUTOTUNE)
         dataset = dataset.repeat(self.epochs)
-        dataset = dataset.prefetch(tf.data.experimental.AUTOTUNE)
+        dataset = dataset.prefetch(tf.data.AUTOTUNE)
         
         return dataset
     
     def __call__(self, *args: Any, **kwds: Any) -> Any:
-        dataset, len_dataset, org_shape = self.dataset_from_path()
-        dataset = self.preprocess_dataset(dataset, org_shape)
+        dataset, len_dataset = self.dataset_from_path()
+        dataset = self.preprocess_dataset(dataset)
         dataset = self.configure_dataset(dataset)
+
+        # image_file = get_files_recursive(self.image_path)
+        # label_file = get_files_recursive(self.label_path, "color")
+        # data_path_ds = tf.data.Dataset.from_tensor_slices((image_file, label_file))
+
+        # def load_image_resize_normalize_onehot(image_file, label_file):
+        #     image = tf.image.decode_png(tf.io.read_file(image_file), channels=3)
+        #     label = tf.image.decode_png(tf.io.read_file(label_file), channels=3)
+
+        #     image = tf.image.resize(image, self.image_shape, method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+        #     label = tf.image.resize(label, self.image_shape, method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+
+        #     image = tf.cast(image, tf.float32) / 255.0
+        #     label = one_hot_encode_op(label, self.class_colors)
+        #     return image, label
+
+        # dataset = (data_path_ds
+        #            .cache()
+        #            .map(load_image_resize_normalize_onehot, num_parallel_calls=tf.data.AUTOTUNE)
+        #            .shuffle(self.batch_size * 100)
+        #            .batch(self.batch_size)
+        #            .repeat(self.epochs)
+        #            .map(augment, num_parallel_calls=tf.data.AUTOTUNE)
+        #            .prefetch(buffer_size=tf.data.AUTOTUNE)
+        #            )
+        # len_dataset = len(dataset)
         
         nbatch_dataset = dataset.cardinality().numpy() // self.epochs
         return dataset, len_dataset, nbatch_dataset
