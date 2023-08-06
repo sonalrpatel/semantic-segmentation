@@ -17,7 +17,6 @@ from utils import utils
 from builders import model_builder
 
 import tensorflow as tf
-tf.executing_eagerly()
 from keras import models
 from keras.optimizers import Adam, SGD, Adadelta, Nadam
 from tensorflow_addons.optimizers import AdamW, SGDW, AdaBelief
@@ -26,13 +25,7 @@ from keras.callbacks import TensorBoard, CSVLogger, ModelCheckpoint, EarlyStoppi
 import configargparse
 import os
 
-from albumentations import (
-    Compose, HorizontalFlip, CLAHE, HueSaturationValue, GridDropout, ColorJitter,
-    RandomBrightnessContrast, RandomGamma, OneOf, Rotate, RandomSunFlare, Cutout,
-    ToFloat, ShiftScaleRotate, GridDistortion, ElasticTransform, HueSaturationValue,
-    RGBShift, Blur, MotionBlur, MedianBlur, GaussNoise, CenterCrop,
-    IAAAdditiveGaussianNoise, GaussNoise, OpticalDistortion, RandomSizedCrop
-)
+tf.executing_eagerly()
 
 
 def str2bool(v):
@@ -56,7 +49,7 @@ parser.add("-nt",   "--max_samples_training",       type=int,       default=None
 parser.add("-iv",   "--input_validation",           type=str,       required=True,              help="directory/directories of input samples for validation")
 parser.add("-lv",   "--label_validation",           type=str,       required=True,              help="directory of label samples for validation")
 parser.add("-nv",   "--max_samples_validation",     type=int,       default=None,               help="maximum number of validation samples")
-parser.add("-is",   "--image_shape",                type=int,       required=True, nargs=2,     help="image dimensions (HxW) of inputs and labels for network")
+parser.add("-is",   "--image_size",                 type=int,       required=True, nargs=2,     help="image dimensions (HxW) of inputs and labels for network")
 parser.add("-nc",   "--num_classes",                type=int,       default=32,                 help="the number of classes to be segmented")
 parser.add("-lf",   "--label_file",                 type=str,       required=True,              help="py/xml-file describing the label classes and color values")
 parser.add("-m",    "--model",                      type=str,       required=True,              help="choose the semantic segmentation methods")
@@ -92,7 +85,7 @@ parser.add("-cs",   "--channel_shift",              type=float,     default=0.0,
 def train(*args):
     ## read CLI ##
     conf, unknown = parser.parse_known_args()
-    conf.image_shape = tuple(conf.image_shape)
+    conf.image_size = tuple(conf.image_size)
 
     # check args if conf.loop_training is true
     if conf.loop_training is True:
@@ -117,17 +110,18 @@ def train(*args):
     # check related paths
     paths = check_related_path(conf.output_dir)
 
-    # get class names and class colors by parsing the labels py file
-    _, class_colors = get_labels(parse_convert_py(conf.label_file))
+    # get class names, class colors and class ids by parsing the labels py file
+    class_names, class_colors, class_ids = get_labels(parse_convert_py(conf.label_file))
+    class_ids_color = [list(np.ones(3).astype(int)*k) for k in class_ids]
     assert conf.num_classes == len(class_colors)
 
     ## build data pipeline ##
     # for training
     dataTrain, len_train, nbatch_train = DatasetGenerator(data_path=(conf.input_training, conf.label_training),
                                                           max_samples=conf.max_samples_training,
-                                                          image_shape=conf.image_shape,
+                                                          image_size=conf.image_size,
+                                                          class_colors=class_ids_color,                                                          
                                                           augment=conf.augment,
-                                                          class_colors=class_colors,
                                                           shuffle=conf.shuffle,
                                                           batch_size=conf.batch_size,
                                                           epochs=conf.epochs)()
@@ -136,9 +130,9 @@ def train(*args):
     # for validation
     dataValid, len_valid, nbatch_valid = DatasetGenerator(data_path=(conf.input_validation, conf.label_validation),
                                                           max_samples=conf.max_samples_validation,
-                                                          image_shape=conf.image_shape,
+                                                          image_size=conf.image_size,
+                                                          class_colors=class_ids_color,                                                          
                                                           augment=conf.augment,
-                                                          class_colors=class_colors,
                                                           shuffle=conf.shuffle,
                                                           batch_size=conf.batch_size,
                                                           epochs=conf.epochs)()
@@ -146,7 +140,7 @@ def train(*args):
 
 
     ## build the model ##
-    model, conf.base_model = model_builder(conf.image_shape, conf.num_classes, conf.model, conf.base_model)
+    model, conf.base_model = model_builder(conf.image_size, conf.num_classes, conf.model, conf.base_model, pre_trained=True)
 
     # summary
     model.summary()
@@ -215,7 +209,7 @@ def train(*args):
                                                         # 'miou_{val_mean_io_u:04f}_' + 
                                                         'ep_{epoch:02d}.h5'),
                                                         save_freq=conf.checkpoint_freq*steps_per_epoch, save_weights_only=True)
-    best_checkpoint_cb  = ModelCheckpoint(os.path.join(paths['weights_path'], "weights1.hdf5"),
+    best_checkpoint_cb  = ModelCheckpoint(os.path.join(paths['weights_path'], "best_weights.hdf5"),
                                             save_best_only=True, monitor="val_mean_io_u", mode="max", save_weights_only=False)
     early_stopping_cb   = EarlyStopping(monitor="val_mean_io_u", mode="max", patience=conf.early_stopping_patience, verbose=1)
     lr_scheduler_cb     = LearningRateScheduler(lr_scheduler, conf.learning_rate, conf.lr_warmup, steps_per_epoch, verbose=1)
@@ -233,7 +227,7 @@ def train(*args):
     print("Num Images -->", len_train)
     print("Model -->", conf.model)
     print("Base_model -->", conf.base_model)
-    print("Image Shape -->", [conf.image_shape[0], conf.image_shape[1]])
+    print("Image Shape -->", [conf.image_size[0], conf.image_size[1]])
     print("Epochs -->", conf.epochs)
     print("Final_epoch -->", conf.final_epoch)
     print("Batch Size -->", conf.batch_size)
@@ -248,12 +242,6 @@ def train(*args):
     print("")
     print("Data Augmentation:")
     print("\tData Augmentation Enable -->", conf.augment)
-    # print("\tVertical Flip -->", conf.v_flip)
-    # print("\tHorizontal Flip -->", conf.h_flip)
-    # print("\tBrightness Alteration -->", conf.brightness)
-    # print("\tRotation -->", conf.rotation)
-    # print("\tZoom -->", conf.zoom_range)
-    # print("\tChannel Shift -->", conf.channel_shift)
 
     print("")
 

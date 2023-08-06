@@ -16,7 +16,7 @@ backend = tf.keras.backend
 
 
 class PSPNet(Network):
-    def __init__(self, input_shape: tuple, num_classes: int, version='PSPNet', base_model='ResNet50', **kwargs):
+    def __init__(self, input_shape: tuple, num_classes: int, version='PSPNet', base_model='ResNet50', pre_trained=False, **kwargs):
         """
         The initialization of PSPNet.
         :param input_shape: the size of input image        
@@ -42,7 +42,7 @@ class PSPNet(Network):
                               'MobileNetV2',
                               'Xception-DeepLab']
         
-        super(PSPNet, self).__init__(num_classes, version, base_model, dilation, **kwargs)
+        super(PSPNet, self).__init__(num_classes, version, base_model, dilation, pre_trained, **kwargs)
         self.input_shape = input_shape
 
     def __call__(self, **kwargs):
@@ -53,8 +53,9 @@ class PSPNet(Network):
         num_classes = self.num_classes
         _, inputs_h, inputs_w, _ = backend.int_shape(inputs)
 
-        h, w = inputs_h // 8, inputs_w // 8
-        x = self.encoder(inputs)
+        # h, w = inputs_h // 8, inputs_w // 8
+        x = self.encoder(inputs, output_stages='c4')
+        h, w = x.shape[1], x.shape[2]
 
         if not (h % 6 == 0 and w % 6 == 0):
             raise ValueError('\'pyramid pooling\' size must be divided by 6, but received {size}'.format(size=(h, w)))
@@ -62,42 +63,49 @@ class PSPNet(Network):
                      (h // 2, w // 2),
                      (h // 3, w // 3),
                      (h // 6, w // 6)]
+        
+        if not (inputs_h % h == 0 and inputs_w % w == 0):
+            raise ValueError('image size must be divisible')
+        up_f_h, up_f_w = inputs_h // h, inputs_w // w
+
+        num_filters = x.shape[3] // 4
 
         # pyramid pooling
         x1 = custom_layers.GlobalAveragePooling2D(keep_dims=True)(x)
-        x1 = layers.Conv2D(512, 1, strides=1, kernel_initializer='he_normal')(x1)
+        x1 = layers.Conv2D(num_filters, 1, strides=1, kernel_initializer='he_normal')(x1)
         x1 = layers.BatchNormalization()(x1)
         x1 = layers.ReLU()(x1)
         x1 = layers.UpSampling2D(size=pool_size[0])(x1)
 
         x2 = layers.AveragePooling2D(pool_size=pool_size[1])(x)
-        x2 = layers.Conv2D(512, 1, strides=1, kernel_initializer='he_normal')(x2)
+        x2 = layers.Conv2D(num_filters, 1, strides=1, kernel_initializer='he_normal')(x2)
         x2 = layers.BatchNormalization()(x2)
         x2 = layers.ReLU()(x2)
         x2 = layers.UpSampling2D(size=pool_size[1])(x2)
 
         x3 = layers.AveragePooling2D(pool_size=pool_size[2])(x)
-        x3 = layers.Conv2D(512, 1, strides=1, kernel_initializer='he_normal')(x3)
+        x3 = layers.Conv2D(num_filters, 1, strides=1, kernel_initializer='he_normal')(x3)
         x3 = layers.BatchNormalization()(x3)
         x3 = layers.ReLU()(x3)
         x3 = layers.UpSampling2D(size=pool_size[2])(x3)
 
         x6 = layers.AveragePooling2D(pool_size=pool_size[3])(x)
-        x6 = layers.Conv2D(512, 1, strides=1, kernel_initializer='he_normal')(x6)
+        x6 = layers.Conv2D(num_filters, 1, strides=1, kernel_initializer='he_normal')(x6)
         x6 = layers.BatchNormalization()(x6)
         x6 = layers.ReLU()(x6)
         x6 = layers.UpSampling2D(size=pool_size[3])(x6)
 
         x = layers.Concatenate()([x, x1, x2, x3, x6])
 
-        x = layers.Conv2D(512, 3, strides=1, padding='same', kernel_initializer='he_normal')(x)
+        x = layers.Conv2D(num_filters, 3, strides=1, padding='same', kernel_initializer='he_normal')(x)
         x = layers.BatchNormalization()(x)
         x = layers.ReLU()(x)
+        x = layers.SpatialDropout2D(0.1)(x)
 
         x = layers.Conv2D(num_classes, 1, strides=1, kernel_initializer='he_normal')(x)
-        x = layers.BatchNormalization()(x)
-
-        x = layers.UpSampling2D(size=(8, 8), interpolation='bilinear')(x)
+        # x = layers.BatchNormalization()(x)
+        x = layers.UpSampling2D(size=(up_f_h, up_f_w), interpolation='bilinear')(x)
+        x = layers.Softmax()(x)
 
         outputs = x
         return models.Model(inputs, outputs, name=self.version)

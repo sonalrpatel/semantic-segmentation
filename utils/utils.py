@@ -9,9 +9,9 @@ The implementation of some utils for loading and processing images.
 import numpy as np
 import cv2
 import tensorflow as tf
-tf.executing_eagerly()
 import albumentations as A
 
+tf.executing_eagerly()
 utils = tf.keras.utils
 tf_image = tf.keras.preprocessing.image
 

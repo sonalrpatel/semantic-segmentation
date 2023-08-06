@@ -80,8 +80,7 @@ class UNet(Network):
         x = self._conv_bn_relu(x, 64, 3, strides=1)
 
         x = layers.UpSampling2D(size=(2, 2))(x)
-        x = layers.Conv2D(num_classes, 1, strides=1,
-                          kernel_initializer='he_normal')(x)
+        x = layers.Conv2D(num_classes, 1, strides=1, kernel_initializer='he_normal')(x)
         x = layers.BatchNormalization()(x)
 
         outputs = x

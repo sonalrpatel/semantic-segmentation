@@ -23,8 +23,8 @@ from keras.applications.regnet import RegNetY080, RegNetY120, RegNetY160, RegNet
 from keras.applications.efficientnet import EfficientNetB0, EfficientNetB1, EfficientNetB2
 from keras.applications.efficientnet import EfficientNetB3, EfficientNetB4, EfficientNetB5
 from keras.applications.efficientnet import EfficientNetB6, EfficientNetB7
-from .efficientnet_v2 import EfficientNetV2B0, EfficientNetV2B1, EfficientNetV2B2
-from .efficientnet_v2 import EfficientNetV2B3, EfficientNetV2S, EfficientNetV2M, EfficientNetV2L
+from base_models.efficientnet_v2 import EfficientNetV2B0, EfficientNetV2B1, EfficientNetV2B2
+from base_models.efficientnet_v2 import EfficientNetV2B3, EfficientNetV2S, EfficientNetV2M, EfficientNetV2L
 import random
 
 kernel_seed = random.randint(0, 1000)
@@ -38,7 +38,7 @@ def get_backbone(backbone_name: str,
                  output_stride: int = None,
                  depth: int = None
                  ) -> Model:
-    backbone_layers = {
+    backbone_layer_names = {
         'ResNet50': ('conv1_relu', 'conv2_block3_out', 'conv3_block4_out', 'conv4_block6_out', 'conv5_block3_out'),
         'ResNet101': ('conv1_relu', 'conv2_block3_out', 'conv3_block4_out', 'conv4_block23_out', 'conv5_block3_out'),
         'ResNet152': ('conv1_relu', 'conv2_block3_out', 'conv3_block8_out', 'conv4_block36_out', 'conv5_block3_out'),
@@ -115,24 +115,28 @@ def get_backbone(backbone_name: str,
                                   input_tensor=input_tensor,
                                   pooling=None)
     
-    layer_names = backbone_layers[backbone_name]
+    # get backbone layer names
+    layer_names = backbone_layer_names[backbone_name]
+    
     if depth is None:
         depth = len(layer_names)
 
-    X_skip = []
     # get the output of intermediate backbone layers to use them as skip connections
+    x_skip = []
     for i in range(depth):
-        X_skip.append(backbone_.get_layer(layer_names[i]).output)
+        x_skip.append(backbone_.get_layer(layer_names[i]).output)
         
-    backbone = Model(inputs=input_tensor, outputs=X_skip, name=f'{backbone_name}_backbone')
+    backbone = Model(inputs=input_tensor, outputs=x_skip, name=f'{backbone_name}_backbone')
     
     if freeze_backbone:
         backbone.trainable = False
     elif unfreeze_at is not None:
-        layer_dict = {layer.name: i for i,layer in enumerate(backbone.layers)}
+        layer_dict = {layer.name: i for i, layer in enumerate(backbone.layers)}
         unfreeze_index = layer_dict[unfreeze_at]
         for layer in backbone.layers[:unfreeze_index]:
             layer.trainable = False
+    else:
+        backbone.trainable = True
     return backbone
 
 
@@ -374,10 +378,11 @@ def DeepLabV3plus(input_shape: tuple,
                             input_tensor=input_tensor,
                             freeze_backbone=freeze_backbone,
                             unfreeze_at=unfreeze_at)
-    Skip = backbone(input_tensor, training=False)
+    
+    skip = backbone(input_tensor, training=False)
 
-    x = Skip[-1]
-    low_level_features = Skip[1]
+    x = skip[-1]
+    low_level_features = skip[1]
     
     # Atrous Spatial Pyramid Pooling
     x = ASPP(input_tensor=x, 
@@ -464,17 +469,17 @@ def base_Unet(unet_type: str,
     if backbone_name is None:
         # Εncoder
         x, skip = downsampling_block(input_tensor, filters[0], dropout_rate[0], dropout_type[0], activation, unet_type)
-        Skip = [skip]
+        skip = [skip]
         for i in range(1, depth-1):
             x, skip = downsampling_block(x, filters[i], dropout_rate[i], dropout_type[i], activation, unet_type)
-            Skip.append(skip)
+            skip.append(skip)
         
         # Bottleneck
         x = conv_block(x, filters[-1], dropout_rate[-1], dropout_type[-1], activation, unet_type)
         
         # Decoder
         for i in range(depth-2, -1, -1):
-            x = upsample_and_concat(x, Skip[i], filters[i], dropout_rate[i], dropout_type[i], activation, unet_type)
+            x = upsample_and_concat(x, skip[i], filters[i], dropout_rate[i], dropout_type[i], activation, unet_type)
 
     else:
         # when using bakcbone because the stem performs downsampling and we have another 4 downsampling layers
@@ -488,15 +493,15 @@ def base_Unet(unet_type: str,
                                 freeze_backbone=freeze_backbone,
                                 unfreeze_at=unfreeze_at,
                                 depth=depth)
-        Skip = backbone(input_tensor, training=False)
+        skip = backbone(input_tensor, training=False)
         
         # Bottleneck
-        x = Skip[-1]
-        Skip.insert(0, None) # means that there are no features to concatenate with
+        x = skip[-1]
+        skip.insert(0, None) # means that there are no features to concatenate with
     
         # iterate 4 times
         for i in range(depth-1, -1, -1):
-            x = upsample_and_concat(x, Skip[i], filters[i], dropout_rate[i], dropout_type[i], activation, unet_type)
+            x = upsample_and_concat(x, skip[i], filters[i], dropout_rate[i], dropout_type[i], activation, unet_type)
         
     output = segmentation_head(x, num_classes=num_classes)
     
@@ -759,10 +764,10 @@ def Unet_plus(input_shape: tuple,
                                 unfreeze_at=unfreeze_at,
                                 #output_stride=output_stride,
                                 )
-        Skip = backbone(input_tensor, training=False)
+        skip = backbone(input_tensor, training=False)
         
-        Skip.insert(0, None)
-        skip0_0, skip1_0, skip2_0, skip3_0, skip4_0, skip5_0 = Skip
+        skip.insert(0, None)
+        skip0_0, skip1_0, skip2_0, skip3_0, skip4_0, skip5_0 = skip
         
     x0_1 = upsample_and_concat(skip1_0, skip0_0, filters[0], dropout_rate, dropout_type, activation, unet_type)
     x1_1 = upsample_and_concat(skip2_0, skip1_0, filters[1], dropout_rate, dropout_type, activation, unet_type)

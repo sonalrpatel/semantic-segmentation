@@ -30,12 +30,12 @@ models_seg = {'Unet': Unet,
               'DeepLabV3plus': DeepLabV3plus}
 
 
-def model_builder(input_shape: tuple, num_classes: int, model='DeepLabV3', base_model=None):
+def model_builder(input_shape: tuple, num_classes: int, model='DeepLabV3', base_model=None, pre_trained=False):
     assert model in models or models_seg
 
     if model in models:
         # initialise __init__ of the selected model class
-        model = models[model](input_shape, num_classes, model, base_model)
+        model = models[model](input_shape, num_classes, model, base_model, pre_trained)
         
         # get the base_model name
         base_model = model.get_base_model()
