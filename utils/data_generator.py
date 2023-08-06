@@ -125,105 +125,110 @@ The following is for Dataset Generation using tf.data.Dataset method.
 class DatasetGenerator(object):
     def __init__(self,
                  data_path=None,
+                 label_name_suffix=None,
                  max_samples=0,
-                 image_shape=(256, 256),
+                 image_size=(384, 384),
+                 class_colors=None,                 
                  augment=False,
-                 class_colors=None,
+                 resize=False,
                  shuffle=True,
-                 batch_size=4,
-                 epochs=10):
+                 batch_size=4,                 
+                 epochs=100,
+                 seed=101
+                 ):
         assert max_samples != 0
         assert len(data_path) == 2
-        assert len(image_shape) == 2
+        assert len(image_size) == 2
 
-        image_path, label_path = data_path
+        image_dir_path, label_dir_path = data_path
 
-        self.image_path = image_path
-        self.label_path = label_path
+        self.image_dir_path = image_dir_path
+        self.label_dir_path = label_dir_path
+        self.label_name_suffix = label_name_suffix
         self.max_samples = max_samples
-        self.image_shape = image_shape
+        self.image_size = image_size
         self.class_colors = class_colors
         self.augment = augment
+        self.resize = resize
         self.shuffle = shuffle
+        self.batch_size = batch_size        
         self.epochs = epochs
-        self.batch_size = batch_size
-        self.seed = 42
+        self.seed = seed
 
-    # read files from data path
+    # 1# read files from data path
     def dataset_from_path(self):
         # list files
-        image_file = get_files_recursive(self.image_path)
-        label_file = get_files_recursive(self.label_path, "color")
-        _, ids = sample_list(label_file, n_samples=self.max_samples)
-        image_file = np.take(image_file, ids)
-        label_file = np.take(label_file, ids)
-        data_path_ds = tf.data.Dataset.from_tensor_slices((image_file, label_file))
+        image_path = get_files_recursive(self.image_dir_path)
+        label_path = get_files_recursive(self.label_dir_path, self.label_name_suffix)
+        _, ids = sample_list(label_path, n_samples=self.max_samples)
+        image_path = np.take(image_path, ids)
+        label_path = np.take(label_path, ids)
+        data_path_ds = tf.data.Dataset.from_tensor_slices((image_path, label_path))
         
         # load files
-        def load_files(image_file, label_file):
-            image = load_image_op(image_file)
-            label = load_image_op(label_file)
+        def load_data(image_path, label_path):
+            image = load_image_op(image_path)
+            label = load_image_op(label_path)
             return image, label
         
-        dataset = data_path_ds.map(load_files, num_parallel_calls=tf.data.AUTOTUNE)
+        dataset = data_path_ds.map(load_data, num_parallel_calls=tf.data.AUTOTUNE)
+
         return dataset, len(dataset)
 
-    # preprocess dataset
+    # 2# preprocess dataset
+    # ref:
+    # https://github.com/albumentations-team/albumentations_examples/blob/master/notebooks/tensorflow-example.ipynb
+    # https://stackoverflow.com/questions/66677858/how-do-we-get-correct-shape-dimensions-using-albumentation-with-tensorflow    
+    # https://snyk.io/advisor/python/albumentations/functions/albumentations.RandomSizedCrop
+    # https://www.kaggle.com/code/syalabiseet/how-to-albumentations-tfrec-gpu
     def preprocess_dataset(self, dataset: tf.data.Dataset):
         # load data
-        def load_data(image, label):
-            image = resize_image_op(image, self.image_shape)
-            label = resize_image_op(label, self.image_shape)
-            
-            if self.augment:
-                image, label = augment(image, label)
-            
+        def augment(image, label):
+            """Function is formulated to convert the image and label
+            from a numpy array to a tf numpy array."""
+            image, label = tf.numpy_function(func=augment_func, 
+                                             inp=[image, label, self.image_size],
+                                             Tout=[tf.uint8, tf.uint8])
+            return image, label
+        
+        def set_shapes(image, label):
+            image.set_shape(self.image_size + (3,))
+            label.set_shape(self.image_size + (3,))
+            return image, label        
+
+        def resize(image, label):
+            image = resize_image_op(image, self.image_size)
+            label = resize_image_op(label, self.image_size)
+            return image, label
+
+        def normalize_n_one_hot(image, label):
             image = normalize_image_op(image)
             label = one_hot_encode_op(label, self.class_colors)
             return image, label
 
-        dataset = dataset.map(load_data, num_parallel_calls=tf.data.AUTOTUNE)
+        if self.augment:
+            dataset = dataset.map(augment, num_parallel_calls=tf.data.AUTOTUNE)
+            dataset = dataset.map(set_shapes, num_parallel_calls=tf.data.AUTOTUNE)
+        if self.resize:
+            dataset = dataset.map(resize, num_parallel_calls=tf.data.AUTOTUNE)
+        dataset = dataset.map(normalize_n_one_hot, num_parallel_calls=tf.data.AUTOTUNE)
+
         return dataset
 
+    # 3# configure dataset
     def configure_dataset(self, dataset: tf.data.Dataset):
         if self.shuffle:
             dataset = dataset.shuffle(buffer_size=self.batch_size*100)
         dataset = dataset.batch(self.batch_size, drop_remainder=True, num_parallel_calls=tf.data.AUTOTUNE)
         dataset = dataset.repeat(self.epochs)
         dataset = dataset.prefetch(tf.data.AUTOTUNE)
-        
+
         return dataset
     
     def __call__(self, *args: Any, **kwds: Any) -> Any:
         dataset, len_dataset = self.dataset_from_path()
         dataset = self.preprocess_dataset(dataset)
         dataset = self.configure_dataset(dataset)
-
-        # image_file = get_files_recursive(self.image_path)
-        # label_file = get_files_recursive(self.label_path, "color")
-        # data_path_ds = tf.data.Dataset.from_tensor_slices((image_file, label_file))
-
-        # def load_image_resize_normalize_onehot(image_file, label_file):
-        #     image = tf.image.decode_png(tf.io.read_file(image_file), channels=3)
-        #     label = tf.image.decode_png(tf.io.read_file(label_file), channels=3)
-
-        #     image = tf.image.resize(image, self.image_shape, method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
-        #     label = tf.image.resize(label, self.image_shape, method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
-
-        #     image = tf.cast(image, tf.float32) / 255.0
-        #     label = one_hot_encode_op(label, self.class_colors)
-        #     return image, label
-
-        # dataset = (data_path_ds
-        #            .cache()
-        #            .map(load_image_resize_normalize_onehot, num_parallel_calls=tf.data.AUTOTUNE)
-        #            .shuffle(self.batch_size * 100)
-        #            .batch(self.batch_size)
-        #            .repeat(self.epochs)
-        #            .map(augment, num_parallel_calls=tf.data.AUTOTUNE)
-        #            .prefetch(buffer_size=tf.data.AUTOTUNE)
-        #            )
-        # len_dataset = len(dataset)
         
         nbatch_dataset = dataset.cardinality().numpy() // self.epochs
         return dataset, len_dataset, nbatch_dataset

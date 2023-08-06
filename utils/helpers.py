@@ -245,12 +245,9 @@ def get_labels(modules):
     labels = modules.labels
     class_names = [labels[k].name for k in range(len(labels)) if labels[k].trainId >= 0 and labels[k].trainId < 255]    
     class_colors = [list(labels[k].color) for k in range(len(labels)) if labels[k].trainId >= 0 and labels[k].trainId < 255]
+    class_ids = [labels[k].trainId for k in range(len(labels)) if labels[k].trainId >= 0 and labels[k].trainId < 255]
 
-    print("Number of classes - ", len(class_colors))
-    for name, color in zip(class_names, class_colors):
-        print(f"{name} - {color}")
-
-    return class_names, class_colors
+    return class_names, class_colors, class_ids
 
 
 def count_pixels(seg_path, class_path):

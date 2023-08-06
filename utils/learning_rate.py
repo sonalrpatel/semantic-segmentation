@@ -66,8 +66,8 @@ def cosine_decay(max_lr, max_epochs=100, min_lr=1e-7, warmup=False):
 def polynomial_decay(nbatch_train):
     WEIGHT_DECAY = 0.00005
     MOMENTUM = 0.9
-    START_LR = 0.001
-    END_LR = 0.0001
+    START_LR = 0.01
+    END_LR = 0.00001
     LR_DECAY_EPOCHS = 10
     POWER = 2
 

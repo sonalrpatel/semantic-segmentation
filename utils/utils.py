@@ -9,6 +9,8 @@ The implementation of some utils for loading and processing images.
 import numpy as np
 import cv2
 import tensorflow as tf
+tf.executing_eagerly()
+import albumentations as A
 
 utils = tf.keras.utils
 tf_image = tf.keras.preprocessing.image
@@ -163,20 +165,44 @@ def random_channel_shift(image, label, channel_shift_range):
     return image, label
 
 
-class Augment(tf.keras.layers.Layer):
-    def __init__(self, seed=42):
-        super().__init__()
-        # both use the same seed, so they'll make the same random changes.
-        # self.augment_inputs = tf.keras.Sequential([tf.keras.layers.RandomFlip("horizontal", seed=seed),
-        #                                            tf.keras.layers.RandomRotation(0.2, seed=seed),
-        #                                            ])
-        self.augment_inputs = tf.image.stateless_random_flip_left_right(image, seed=(42, 101))
-        self.augment_labels = tf.image.stateless_random_flip_left_right(image, seed=(42, 101))
+def get_augmentations(image_size):
+    return A.Compose([
+        A.OneOf(
+            [
+                A.Resize(image_size[0], image_size[1]),
+                A.RandomSizedCrop(min_max_height=(int(image_size[0]*0.5), int(image_size[0]*0.8)),
+                                  height=image_size[0],
+                                  width=image_size[1]),
+            ], p=1),
+        A.CoarseDropout(),
+        A.HorizontalFlip(p=0.5),
+        A.RandomBrightnessContrast(),
+        A.HueSaturationValue(hue_shift_limit=100, val_shift_limit=0)
+        ])
 
-    def call(self, inputs, labels):
-        inputs = self.augment_inputs(inputs)
-        labels = self.augment_labels(labels)
-        return inputs, labels
+
+def augment_func(image, label, image_size):
+    """Customizable augmentation using Albumentations library."""
+    """Set always_apply to instantiate transform as a
+    preprocess transformation."""
+    transforms = get_augmentations(image_size)
+    
+    # Converting image to tf.float32 type
+    """Albumentations augmentation functions only supports
+    .uint8 and .float32 data types therefore conversion is
+    required."""
+    image = tf.cast(x=image, dtype=tf.uint8).numpy()
+    label = tf.cast(x=label, dtype=tf.uint8).numpy()
+
+    # Apply augmentation on each image instance
+    """transforms function is an Albumentations Compose()
+    function that outputs a dictionary in a form of 
+    {'image': image}, and image is in uint8 form."""
+    augment = transforms(image=image, mask=label)
+    image = augment['image']
+    label = augment['mask']
+
+    return image, label
 
 
 def augment(image, label, seed=(42, 101)):
@@ -187,6 +213,7 @@ def augment(image, label, seed=(42, 101)):
     image = tf.image.stateless_random_brightness(image, max_delta=0.5, seed=seed)
     image = tf.image.stateless_random_contrast(image, lower=0.5, upper=1.5, seed=seed)
     image = tf.image.stateless_random_jpeg_quality(image, min_jpeg_quality=75, max_jpeg_quality=95, seed=seed)
+    
     return image, label
 
 
@@ -262,10 +289,10 @@ def one_hot_encode(seg, class_labels):
     return one_hot
 
 
-def one_hot_encode_op(mask, class_colors):
+def one_hot_encode_op(mask, color_map):
     one_hot_map = []
 
-    for color in class_colors:
+    for color in color_map:
         class_map = tf.zeros(mask.shape[0:2], dtype=tf.int32)
         # find instances of color and append layer to one-hot-map
         class_map = tf.bitwise.bitwise_or(class_map, tf.cast(tf.reduce_all(tf.equal(mask, color), axis=-1), tf.int32))
@@ -278,35 +305,30 @@ def one_hot_encode_op(mask, class_colors):
     return one_hot_map
 
 
-# def one_hot_encode_op(image, palette):
-#     one_hot_map = []
-#     for class_colors in palette:
-#         class_colors = [np.array(class_colors)]
-#         class_map = tf.zeros(image.shape[0:2], dtype=tf.int32)
-#         for color in class_colors:
-#             # find instances of color and append layer to one-hot-map
-#             class_map = tf.bitwise.bitwise_or(class_map, tf.cast(tf.reduce_all(tf.equal(image, color), axis=-1), tf.int32))
-#         one_hot_map.append(class_map)
-#     # finalize one-hot-map
-#     one_hot_map = tf.stack(one_hot_map, axis=-1)
-#     one_hot_map = tf.cast(one_hot_map, tf.float32)
-#     return one_hot_map
-
-
 def decode_one_hot_gray(one_hot_map):
+    
     return np.argmax(one_hot_map, axis=-1)
+
+
+def decode_gray_index(gray_index, color_map):
+    color_codes = np.array(color_map)
+    pred = color_codes[gray_index.astype(int)]
+    
+    return pred
 
 
 def decode_one_hot(one_hot_map, color_map):
     pred = np.argmax(one_hot_map, axis=-1)
     color_codes = np.array(color_map)
     pred = color_codes[pred.astype(int)]
+    
     return pred
 
 
 def decode_one_hot_op(one_hot_map, color_map):
     pred = tf.argmax(one_hot_map, axis=-1)
     pred = tf.convert_to_tensor(np.array(color_map)[tf.cast(pred, tf.int8)])
+    
     return pred
 
 

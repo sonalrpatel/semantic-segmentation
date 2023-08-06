@@ -10,16 +10,14 @@ from utils.callbacks import LearningRateScheduler, LearningRateGetvalue
 from utils.optimizers import *
 from utils.learning_rate import *
 from utils.metrics import MeanIoU
-from utils.loss_func import *
-from utils.loss_function import *
 from utils.losses import *
-from utils.loss_segmentation import IoULoss, DiceLoss, TverskyLoss, FocalTverskyLoss, HybridLoss, FocalHybridLoss
 from utils.helpers import *
 from utils.data_generator import DatasetGenerator
 from utils import utils
 from builders import model_builder
 
 import tensorflow as tf
+tf.executing_eagerly()
 from keras import models
 from keras.optimizers import Adam, SGD, Adadelta, Nadam
 from tensorflow_addons.optimizers import AdamW, SGDW, AdaBelief
@@ -48,7 +46,7 @@ def str2bool(v):
 
 # parse parameters from config file or CLI
 parser = configargparse.ArgParser()
-parser.add("-c",    "--config",     is_config_file=True,            default="config/config.semseg.cityscapes.yml", help="config file")
+parser.add("-c",    "--config",     is_config_file=True,            default="config/config.semseg.serm.yml", help="config file")
 # parser.add("-c",    "--config",                     is_config_file=True,                        help="config file")
 parser.add("-lp",   "--loop_training",              type=str2bool,  default=False,              help="training in loop from main")
 parser.add("-d",    "--dataset",                    type=str,       default=None,               help="the name of the dataset")
@@ -94,6 +92,7 @@ parser.add("-cs",   "--channel_shift",              type=float,     default=0.0,
 def train(*args):
     ## read CLI ##
     conf, unknown = parser.parse_known_args()
+    conf.image_shape = tuple(conf.image_shape)
 
     # check args if conf.loop_training is true
     if conf.loop_training is True:
@@ -159,32 +158,10 @@ def train(*args):
 
     ## choose loss ##
     losses = {
-        # losses.py
         'ce'                    : categorical_crossentropy_with_logits,
         'focal_loss'            : focal_loss(),
         'miou_loss'             : miou_loss(num_classes=conf.num_classes),
         'self_balanced_focal_loss'  : self_balanced_focal_loss(),
-        
-        # loss_segmentation.py
-        'FocalHybridLoss'       : eval('FocalHybridLoss')(),
-
-        # loss_functions.py
-        'wce_loss'              : Semantic_loss_functions().weighted_cross_entropyloss,
-        'focal_loss_'           : Semantic_loss_functions().focal_loss,
-        'dice_loss'             : Semantic_loss_functions().dice_loss,
-        'bce_dice_loss'         : Semantic_loss_functions().bce_dice_loss,
-        'tversky_loss'          : Semantic_loss_functions().tversky_loss,
-        'log_cosh_dice_loss'    : Semantic_loss_functions().log_cosh_dice_loss,
-        'jacard_loss'           : Semantic_loss_functions().jacard_loss,
-        'ssim_loss'             : Semantic_loss_functions().ssim_loss,
-        'unet3p_hybrid_loss'    : Semantic_loss_functions().unet3p_hybrid_loss,
-        'basnet_hybrid_loss'    : Semantic_loss_functions().basnet_hybrid_loss,
-
-        # loss_func.py
-        'iou_loss'              : LossFunc(conf.num_classes).iou_loss,
-        'dice_loss_'            : LossFunc(conf.num_classes).dice_loss,
-        'ce_iou_loss'           : LossFunc(conf.num_classes).CEIoU_loss,
-        'ce_dice_loss'          : LossFunc(conf.num_classes).CEDice_loss
         }
 
     loss = losses[conf.loss] if conf.loss is not None else categorical_crossentropy_with_logits
@@ -206,15 +183,15 @@ def train(*args):
     optimizers = {
         'adam'      : Adam(learning_rate=conf.learning_rate),
         'nadam'     : Nadam(learning_rate=conf.learning_rate),
-        'sgd'       : SGD(learning_rate=conf.learning_rate, momentum=0.99),
-        'adamw'     : AdamW(learning_rate=conf.learning_rate, weight_decay=0.00005),
-        'sgdw'      : SGDW(learning_rate=conf.learning_rate, momentum=0.99, weight_decay=0.00005),
+        'sgd'       : SGD(learning_rate=conf.learning_rate, momentum=0.9),
+        'adamw'     : AdamW(learning_rate=conf.learning_rate, weight_decay=0.0005),
+        'sgdw'      : SGDW(learning_rate=conf.learning_rate, momentum=0.9, weight_decay=0.0005),
 
         'Adam'      : Adam(lr_scheduler),
         'Adadelta'  : Adadelta(lr_scheduler),
-        'AdamW'     : AdamW(learning_rate=lr_scheduler, weight_decay=0.00005),
+        'AdamW'     : AdamW(learning_rate=lr_scheduler, weight_decay=0.0005),
         'AdaBelief' : AdaBelief(learning_rate=lr_scheduler),
-        'SGDW'      : SGDW(learning_rate=lr_scheduler, weight_decay=0.00005, momentum=0.9)
+        'SGDW'      : SGDW(learning_rate=lr_scheduler, weight_decay=0.0005, momentum=0.9)
         }
     optimizer = optimizers[conf.optimizer]
 
@@ -242,11 +219,11 @@ def train(*args):
                                             save_best_only=True, monitor="val_mean_io_u", mode="max", save_weights_only=False)
     early_stopping_cb   = EarlyStopping(monitor="val_mean_io_u", mode="max", patience=conf.early_stopping_patience, verbose=1)
     lr_scheduler_cb     = LearningRateScheduler(lr_scheduler, conf.learning_rate, conf.lr_warmup, steps_per_epoch, verbose=1)
-    lr_getvalue_cb      = LearningRateGetvalue()
+    # lr_getvalue_cb      = LearningRateGetvalue()
 
     # list of callbacks
-    # callbacks = [tensorboard_cb, csvlogger_cb, checkpoint_cb, best_checkpoint_cb, lr_scheduler_cb, early_stopping_cb, lr_cb]
-    callbacks = [tensorboard_cb, csvlogger_cb, checkpoint_cb, best_checkpoint_cb, early_stopping_cb, lr_getvalue_cb]
+    callbacks = [tensorboard_cb, csvlogger_cb, checkpoint_cb, best_checkpoint_cb, lr_scheduler_cb, early_stopping_cb]
+    # callbacks = [tensorboard_cb, csvlogger_cb, checkpoint_cb, best_checkpoint_cb, lr_getvalue_cb, early_stopping_cb]
 
 
     ## begin training ##
