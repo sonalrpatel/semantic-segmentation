@@ -1,0 +1,45 @@
+# dataset
+dataset: serm
+input_training: D:\Datasets\serm\0.SeRM_image\train
+label_training: D:\Datasets\serm\0.SeRM_image\trainannot
+max_samples_training: 1000
+input_validation: D:\Datasets\serm\0.SeRM_image\train
+label_validation: D:\Datasets\serm\0.SeRM_image\trainannot
+max_samples_validation: 200
+label_file: config\serm_labels.py
+num_classes: 17
+
+# loop training
+loop_training: False
+
+# model
+image_size: [192, 192]
+model: PSPNet
+base_model: ResNet101
+
+# epochs
+epochs: 2
+final_epoch: 4
+batch_size: 4
+valid_batch_size: 4
+augment: true
+shuffle: true
+
+# hyper parameters
+random_seed: 101
+learning_rate: 0.001
+lr_scheduler: poly_decay
+early_stopping_patience: 20
+loss: focal_loss
+optimizer: sgd
+
+# output directory
+output_dir: output
+
+# model weights
+weights: output
+
+# for predict.py only
+input_testing: D:\Datasets\cityscapes\leftImg8bit_trainvaltest\leftImg8bit\test
+label_testing: D:\Datasets\cityscapes\gtFine_trainvaltest\gtFine\test
+max_samples_testing: 5
