@@ -120,7 +120,7 @@ def train(*args):
     dataTrain, len_train, nbatch_train = DatasetGenerator(data_path=(conf.input_training, conf.label_training),
                                                           max_samples=conf.max_samples_training,
                                                           image_size=conf.image_size,
-                                                          class_colors=class_ids_color,                                                          
+                                                          class_colors=class_ids_color,
                                                           augment=conf.augment,
                                                           shuffle=conf.shuffle,
                                                           batch_size=conf.batch_size,
@@ -131,7 +131,7 @@ def train(*args):
     dataValid, len_valid, nbatch_valid = DatasetGenerator(data_path=(conf.input_validation, conf.label_validation),
                                                           max_samples=conf.max_samples_validation,
                                                           image_size=conf.image_size,
-                                                          class_colors=class_ids_color,                                                          
+                                                          class_colors=class_ids_color,
                                                           augment=conf.augment,
                                                           shuffle=conf.shuffle,
                                                           batch_size=conf.batch_size,
@@ -140,7 +140,7 @@ def train(*args):
 
 
     ## build the model ##
-    model, conf.base_model = model_builder(conf.image_size, conf.num_classes, conf.model, conf.base_model, pre_trained=True)
+    model, conf.base_model = model_builder(conf.image_size, conf.num_classes, conf.model, conf.base_model, pre_trained=True, freeze_backbone=True)
 
     # summary
     model.summary()
@@ -152,9 +152,9 @@ def train(*args):
 
     ## choose loss ##
     losses = {
-        'ce'                    : categorical_crossentropy_with_logits,
-        'focal_loss'            : focal_loss(),
-        'miou_loss'             : miou_loss(num_classes=conf.num_classes),
+        'ce'                        : categorical_crossentropy_with_logits,
+        'focal_loss'                : focal_loss(),
+        'miou_loss'                 : miou_loss(num_classes=conf.num_classes),
         'self_balanced_focal_loss'  : self_balanced_focal_loss(),
         }
 
@@ -162,13 +162,10 @@ def train(*args):
 
     ## chose optimizer ##
     # lr schedule
-    if conf.lr_warmup and conf.epochs - 5 <= 0:
-        raise ValueError('epochs must be larger than 5 if lr warm up is used.')
-
     lr_decays = {
-        'step_decay'       : step_decay(conf.learning_rate, conf.epochs, warmup=conf.lr_warmup),
-        'poly_decay'       : poly_decay(conf.learning_rate, conf.epochs, warmup=conf.lr_warmup),
-        'cosine_decay'     : cosine_decay(conf.learning_rate, conf.epochs, warmup=conf.lr_warmup),
+        'step_decay'       : step_decay(conf.learning_rate, conf.epochs),
+        'poly_decay'       : poly_decay(conf.learning_rate, conf.epochs),
+        'cosine_decay'     : cosine_decay(conf.learning_rate, conf.epochs),
         'polynomial_decay' : polynomial_decay(nbatch_train)
         }
     lr_scheduler = lr_decays[conf.lr_scheduler]
@@ -210,7 +207,7 @@ def train(*args):
                                                         'ep_{epoch:02d}.h5'),
                                                         save_freq=conf.checkpoint_freq*steps_per_epoch, save_weights_only=True)
     best_checkpoint_cb  = ModelCheckpoint(os.path.join(paths['weights_path'], "best_weights.hdf5"),
-                                            save_best_only=True, monitor="val_mean_io_u", mode="max", save_weights_only=False)
+                                          save_best_only=True, monitor="val_mean_io_u", mode="max", save_weights_only=False)
     early_stopping_cb   = EarlyStopping(monitor="val_mean_io_u", mode="max", patience=conf.early_stopping_patience, verbose=1)
     lr_scheduler_cb     = LearningRateScheduler(lr_scheduler, conf.learning_rate, conf.lr_warmup, steps_per_epoch, verbose=1)
     # lr_getvalue_cb      = LearningRateGetvalue()
@@ -254,74 +251,77 @@ def train(*args):
     history = model.fit(dataTrain,
                         epochs=conf.epochs, initial_epoch=0, steps_per_epoch=steps_per_epoch,
                         validation_data=dataValid, validation_steps=validation_steps, validation_freq=conf.validation_freq,
-                        # max_queue_size=10, workers=os.cpu_count(), use_multiprocessing=False,
                         callbacks=callbacks)
     
+    # store the model into another variable
+    model_ = model
+    
     # -------------------------- #
-    if False:
+    if True:
         # after unfreezing the final backbone weights the batch size might need to be reduced to prevent OOM
         # re-define the dataset streams with new batch size
         # build training data pipeline
-        dataTrain = tf.data.Dataset.from_tensor_slices((files_train_input, files_train_label))
-        dataTrain = dataTrain.shuffle(buffer_size=conf.max_samples_training, reshuffle_each_iteration=True)
-        dataTrain = dataTrain.map(parse_sample, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-        # dataTrain = dataTrain.map(Augment(93))
-        dataTrain = dataTrain.batch(conf.batch_size-2, drop_remainder=True)
-        dataTrain = dataTrain.repeat(conf.final_epoch-conf.epochs)
-        dataTrain = dataTrain.prefetch(1)
-        n_batches_train = dataTrain.cardinality().numpy() // (conf.final_epoch-conf.epochs)
-        print("Built data pipeline for training with {} batches".format(n_batches_train))
+        # for training
+        dataTrain, len_train, nbatch_train = DatasetGenerator(data_path=(conf.input_training, conf.label_training),
+                                                              max_samples=conf.max_samples_training,
+                                                              image_size=conf.image_size,
+                                                              class_colors=class_ids_color,
+                                                              augment=conf.augment,
+                                                              shuffle=conf.shuffle,
+                                                              batch_size=conf.batch_size,
+                                                              epochs=conf.epochs)()
+        print("Built data pipeline for {} training samples with {} batches per epoch".format(len_train, nbatch_train))
 
-        # build validation data pipeline
-        dataValid = tf.data.Dataset.from_tensor_slices((files_valid_input, files_valid_label))
-        dataValid = dataValid.map(parse_sample, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-        dataValid = dataValid.batch(conf.valid_batch_size-2, drop_remainder=True)
-        dataValid = dataValid.repeat(conf.final_epoch-conf.epochs)
-        dataValid = dataValid.prefetch(1)
-        n_batches_valid = dataValid.cardinality().numpy() // (conf.final_epoch-conf.epochs)
-        print("Built data pipeline for validation with {} batches".format(n_batches_valid))
+        # for validation
+        dataValid, len_valid, nbatch_valid = DatasetGenerator(data_path=(conf.input_validation, conf.label_validation),
+                                                              max_samples=conf.max_samples_validation,
+                                                              image_size=conf.image_size,
+                                                              class_colors=class_ids_color,
+                                                              augment=conf.augment,
+                                                              shuffle=conf.shuffle,
+                                                              batch_size=conf.batch_size,
+                                                              epochs=conf.epochs)()
+        print("Built data pipeline for {} validation samples with {} batches per epoch".format(len_valid, nbatch_valid))
 
         # instantiate Model
-        model = model_function(input_shape=INPUT_SHAPE,
-                            filters=FILTERS,
-                            num_classes=NUM_CLASSES,
-                            output_stride=OUTPUT_STRIDE,
-                            activation=ACTIVATION,
-                            dropout_rate=DROPOUT_RATE,
-                            backbone_name=BACKBONE,
-                            freeze_backbone=False,
-                            unfreeze_at=UNFREEZE_AT,
-                            )
+        model, conf.base_model = model_builder(conf.image_size, conf.num_classes, conf.model, conf.base_model, pre_trained=True, freeze_backbone=False)
 
         # load the saved weights into the model to fine tune the high level features of the feature extractor
         # fine tune the encoder network with a lower learning rate
-        model.load_weights(os.path.join(paths['weights_path'], "weights1.hdf5"))
-        model = models.load_model(os.path.join(paths['weights_path'], "weights1.hdf5"), compile=False)
+        for lx in range(len(model_.layers)):
+            if model_.layers[lx].trainable is True:
+                weights = model_.layers[lx].get_weights()
+                model.layers[lx].set_weights(weights)
         
         model.summary()
 
-        # optimizer with lower learning rate
-        optimizer_dict = {
-            'Adam'      : Adam(END_LR),
-            'Adadelta'  : Adadelta(END_LR),
-            'AdamW'     : AdamW(learning_rate=END_LR, weight_decay=WEIGHT_DECAY),
-            'AdaBelief' : AdaBelief(learning_rate=END_LR, weight_decay=WEIGHT_DECAY),
-            'SGDW'      : SGDW(learning_rate=END_LR, weight_decay=WEIGHT_DECAY, momentum=MOMENTUM)
-        }
-
-        optimizer = optimizer_dict[OPTIMIZER_NAME]
-
         # re-compile the model
         model.compile(loss=loss, optimizer=optimizer, metrics=metrics)
+
+        # create callbacks to be called after each epoch
+        tensorboard_cb      = TensorBoard(paths['logs_path'], update_freq="epoch", profile_batch=0)
+        csvlogger_cb        = CSVLogger(os.path.join(paths['checkpoints_path'], "log.csv"), append=True, separator=',')
+        checkpoint_cb       = ModelCheckpoint(os.path.join(paths['checkpoints_path'],
+                                                            '{model}_based_on_{base}_'.format(model=conf.model, base=conf.base_model) + 
+                                                            # 'miou_{val_mean_io_u:04f}_' + 
+                                                            'ep_{epoch:02d}.h5'),
+                                                            save_freq=conf.checkpoint_freq*steps_per_epoch, save_weights_only=True)
+        best_checkpoint_cb  = ModelCheckpoint(os.path.join(paths['weights_path'], "best_weights.hdf5"),
+                                            save_best_only=True, monitor="val_mean_io_u", mode="max", save_weights_only=False)
+        early_stopping_cb   = EarlyStopping(monitor="val_mean_io_u", mode="max", patience=conf.early_stopping_patience, verbose=1)
+        lr_scheduler        = lr_decays[conf.lr_scheduler]
+        lr_scheduler_cb     = LearningRateScheduler(lr_scheduler, conf.learning_rate, conf.lr_warmup, steps_per_epoch, verbose=1)
+
+        # list of callbacks
+        callbacks = [tensorboard_cb, csvlogger_cb, checkpoint_cb, best_checkpoint_cb, lr_scheduler_cb, early_stopping_cb]        
 
         # begin training
         print("\n***** Begin training with unfreezed backbone *****")
 
         # training
         history = model.fit(dataTrain,
-                            epochs=conf.final_epoch, initial_epoch=conf.epochs, steps_per_epoch=n_batches_train,
-                            validation_data=dataValid, validation_steps=n_batches_valid, validation_freq=conf.validation_freq,
-                            # max_queue_size=10, workers=os.cpu_count(), use_multiprocessing=False,
+                            epochs=conf.final_epoch, initial_epoch=conf.epochs, steps_per_epoch=nbatch_train,
+                            validation_data=dataValid, validation_steps=nbatch_valid, validation_freq=conf.validation_freq,
                             callbacks=callbacks)
 
     # save weights

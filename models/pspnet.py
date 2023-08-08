@@ -16,7 +16,8 @@ backend = tf.keras.backend
 
 
 class PSPNet(Network):
-    def __init__(self, input_shape: tuple, num_classes: int, version='PSPNet', base_model='ResNet50', pre_trained=False, **kwargs):
+    def __init__(self, input_shape: tuple, num_classes: int, version='PSPNet', base_model='ResNet50', 
+                 pre_trained=False, freeze_backbone=True, **kwargs):
         """
         The initialization of PSPNet.
         :param input_shape: the size of input image        
@@ -42,7 +43,7 @@ class PSPNet(Network):
                               'MobileNetV2',
                               'Xception-DeepLab']
         
-        super(PSPNet, self).__init__(num_classes, version, base_model, dilation, pre_trained, **kwargs)
+        super(PSPNet, self).__init__(num_classes, version, base_model, dilation, pre_trained, freeze_backbone, **kwargs)
         self.input_shape = input_shape
 
     def __call__(self, **kwargs):
@@ -54,7 +55,7 @@ class PSPNet(Network):
         _, inputs_h, inputs_w, _ = backend.int_shape(inputs)
 
         # h, w = inputs_h // 8, inputs_w // 8
-        x = self.encoder(inputs, output_stages='c4')
+        x = self.encoder(inputs, output_stages='c5')
         h, w = x.shape[1], x.shape[2]
 
         if not (h % 6 == 0 and w % 6 == 0):
@@ -103,9 +104,12 @@ class PSPNet(Network):
         x = layers.SpatialDropout2D(0.1)(x)
 
         x = layers.Conv2D(num_classes, 1, strides=1, kernel_initializer='he_normal')(x)
-        # x = layers.BatchNormalization()(x)
+        x = layers.BatchNormalization()(x)
+        
         x = layers.UpSampling2D(size=(up_f_h, up_f_w), interpolation='bilinear')(x)
-        x = layers.Softmax()(x)
+        # x = layers.Softmax()(x)
 
         outputs = x
-        return models.Model(inputs, outputs, name=self.version)
+        model = models.Model(inputs, outputs, name=self.version)
+
+        return model

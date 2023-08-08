@@ -16,7 +16,7 @@ keras_appl = tf.keras.applications
 
 
 class ResNet(object):
-    def __init__(self, version='ResNet50', dilation=None, pre_trained=False, **kwargs):
+    def __init__(self, version='ResNet50', dilation=None, pre_trained=False, freeze_backbone=False, **kwargs):
         """
        The implementation of ResNet based on Tensorflow.
        :param version: 'ResNet50', 'ResNet101' or 'ResNet152'
@@ -29,6 +29,7 @@ class ResNet(object):
 
         if self.pre_trained:
             assert version in backbone_names_n_layers.keys()
+            self.freeze_backbone = freeze_backbone
         else:
             params = {'ResNet50': [2, 3, 5, 2],
                     'ResNet101': [2, 3, 22, 2],
@@ -155,7 +156,7 @@ class ResNet(object):
         x = layers.Activation('relu')(x)
         return x
 
-    def __call__(self, inputs, output_stages='c5', freeze_backbone=True, unfreeze_at=None, **kwargs):
+    def __call__(self, inputs, output_stages='c5', unfreeze_at=None, **kwargs):
         """
         call for ResNet50, ResNet101 or ResNet152.
         :param inputs: a 4-D tensor.
@@ -166,9 +167,9 @@ class ResNet(object):
         if self.pre_trained:
             backbone = get_backbone(backbone_name=self.version,
                                     input_tensor=inputs,
-                                    freeze_backbone=freeze_backbone,
+                                    freeze_backbone=self.freeze_backbone,
                                     unfreeze_at=unfreeze_at)
-            
+
             skip = backbone(inputs, training=False)
 
             self.outputs = {'c1': skip[0],      # c1-skip   : -- x -- x 64

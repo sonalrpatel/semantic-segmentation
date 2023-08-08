@@ -23,49 +23,18 @@ models = {'FCN-8s': FCN,
           'DeepLabV3Plus': DeepLabV3Plus,
           'BiSegNet': BiSegNet}
 
-models_seg = {'Unet': Unet,
-              'Residual_Unet': Residual_Unet,
-              'Attention_Unet': Attention_Unet,
-              'Unet_plus': Unet_plus,
-              'DeepLabV3plus': DeepLabV3plus}
 
-
-def model_builder(input_shape: tuple, num_classes: int, model='DeepLabV3', base_model=None, pre_trained=False):
-    assert model in models or models_seg
+def model_builder(input_shape: tuple, num_classes: int, model='DeepLabV3', base_model=None, pre_trained=False, freeze_backbone=False):
+    assert model in models
 
     if model in models:
         # initialise __init__ of the selected model class
-        model = models[model](input_shape, num_classes, model, base_model, pre_trained)
+        model = models[model](input_shape, num_classes, model, base_model, pre_trained, freeze_backbone)
         
         # get the base_model name
         base_model = model.get_base_model()
 
         # build the model by calling __call__
         model = model()
-    else:
-        # instantiate model
-        MODEL_TYPE = model
-        BACKBONE = base_model
-        UNFREEZE_AT = 'block6a_expand_activation'
-        FREEZE_BACKBONE = False
-        INPUT_SHAPE = input_shape + [3]
-        FILTERS = [16, 32, 64, 128, 256]
-        NUM_CLASSES = num_classes        
-        OUTPUT_STRIDE = 32
-        ACTIVATION = 'leaky_relu'
-        DROPOUT_RATE = 0
-        PRETRAINED_WEIGHTS = None
-
-        model_function = eval(MODEL_TYPE)
-        model = model_function(input_shape=INPUT_SHAPE,
-                               filters=FILTERS,
-                               num_classes=NUM_CLASSES,
-                               output_stride=OUTPUT_STRIDE,
-                               activation=ACTIVATION,
-                               dropout_rate=DROPOUT_RATE,
-                               backbone_name=BACKBONE,
-                               freeze_backbone=FREEZE_BACKBONE,
-                               weights=PRETRAINED_WEIGHTS
-                               )
 
     return model, base_model
