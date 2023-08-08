@@ -10,7 +10,9 @@ from utils.callbacks import LearningRateScheduler, LearningRateGetvalue
 from utils.optimizers import *
 from utils.learning_rate import *
 from utils.metrics import MeanIoU
+from utils.metrics_ import IOUScore
 from utils.losses import *
+from utils.losses_ import DiceLoss, CategoricalFocalLoss
 from utils.helpers import *
 from utils.data_generator import DatasetGenerator
 from utils import utils
@@ -159,6 +161,7 @@ def train(*args):
         }
 
     loss = losses[conf.loss] if conf.loss is not None else categorical_crossentropy_with_logits
+    loss = CategoricalFocalLoss(alpha=0.25, gamma=2.0) + DiceLoss()
 
     ## chose optimizer ##
     # lr schedule
@@ -187,7 +190,8 @@ def train(*args):
     optimizer = optimizers[conf.optimizer]
 
     ## metrics ##
-    metrics = [tf.keras.metrics.CategoricalAccuracy(), MeanIoU(conf.num_classes)]
+    # metrics = [tf.keras.metrics.CategoricalAccuracy(), MeanIoU(conf.num_classes)]
+    metrics = [tf.keras.metrics.CategoricalAccuracy(), IOUScore(threshold=0.5)]    
 
     ## compile the model ##
     model.compile(optimizer=optimizer, loss=loss, metrics=metrics)

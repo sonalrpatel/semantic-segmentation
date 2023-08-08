@@ -107,7 +107,7 @@ class PSPNet(Network):
         x = layers.BatchNormalization()(x)
         
         x = layers.UpSampling2D(size=(up_f_h, up_f_w), interpolation='bilinear')(x)
-        # x = layers.Softmax()(x)
+        x = layers.Softmax()(x)
 
         outputs = x
         model = models.Model(inputs, outputs, name=self.version)
